@@ -1,34 +1,133 @@
 # SIC — Sistema de Información Contable
 
-Primer esqueleto funcional basado en la oferta técnica del 26 de junio de 2026 para la Asociación Iglesia Universal del Reino de Dios.
+Guía técnica del prototipo web SIC. Implementa una interfaz contable demostrativa con inicio de sesión por roles, reportes, archivos bancarios y auditoría.
 
-## Alcance representado
+> Estado: prototipo funcional con datos demostrativos. No debe usarse con información financiera real ni en producción.
 
-- Panel financiero con ingresos, conciliación y avance del período.
-- Registro y consulta de minutas de depósito.
-- Acceso a conciliación bancaria.
-- Importación de catálogo, balanza y auxiliares contables.
-- Centro de reportes para flujo de efectivo, balanza anual, cambios en patrimonio, situación comparativa y resultados comparativos.
-- Accesos de seguridad, roles y respaldo de datos.
+## Arquitectura
 
-Los datos actuales son demostrativos. La persistencia SQL Server, autenticación, importadores y generación documental corresponden a la siguiente fase de implementación.
+| Capa | Tecnología | Función |
+| --- | --- | --- |
+| Interfaz | React 19, TypeScript y CSS | Pantallas, módulos y navegación basada en permisos. |
+| Aplicación | Vinext y Vite 8 | Renderizado y rutas tipo App Router. |
+| Runtime | Cloudflare Workers y Wrangler | Entorno local y destino de despliegue. |
+| Datos | Drizzle ORM y Cloudflare D1 (SQLite) | Esquema y acceso al catálogo contable. |
+| Migraciones | Drizzle Kit | Generación de SQL desde TypeScript. |
 
-## Catálogo contable
+## Requisitos
 
-El prototipo incorpora el modelo `cuentas_contables` con código, descripción,
-nivel, cuenta padre, indicador de cuenta de movimiento, naturaleza, estado y
-clasificación de flujo. La interfaz incluye búsqueda jerárquica y el formulario
-de movimientos solo ofrece cuentas auxiliares activas.
+- Node.js 22.13 o superior.
+- pnpm 9 o posterior (recomendado; el repositorio incluye `pnpm-lock.yaml`).
+- Cloudflare D1 solo para habilitar persistencia o desplegar.
 
-El catálogo fuente de 761 filas debe copiarse al proyecto para ejecutar la
-carga definitiva. Mientras tanto, la pantalla usa una muestra representativa
-de las seis clases principales y deja visible el estado pendiente de la fuente.
+```bash
+node --version
+pnpm --version
+```
 
-## Ejecución
+## Instalación y ejecución local
 
-Requiere Node.js 22.13 o superior.
+Desde la raíz del repositorio:
 
 ```bash
 pnpm install
 pnpm dev
 ```
+
+Abra [http://localhost:3000](http://localhost:3000). Detenga el servidor con `Ctrl+C`.
+
+También se puede usar `npm install` y `npm run dev`, aunque pnpm es la opción preferida para respetar el lockfile.
+
+## Comandos
+
+| Comando | Descripción |
+| --- | --- |
+| `pnpm dev` | Inicia Vinext y Wrangler en desarrollo. |
+| `pnpm build` | Genera la compilación de producción en `dist/`. |
+| `pnpm start` | Ejecuta la compilación generada; requiere `pnpm build`. |
+| `pnpm lint` | Ejecuta ESLint. |
+| `pnpm test` | Compila y ejecuta las pruebas Node.js. |
+| `pnpm db:generate` | Genera migraciones desde `db/schema.ts`. |
+
+## Acceso de desarrollo
+
+Los usuarios locales están definidos en `lib/auth.ts`:
+
+| Usuario | Contraseña | Rol | Acceso |
+| --- | --- | --- | --- |
+| `contador` | `Conta2026!` | Contador general | Movimientos, catálogo, bancos, importaciones y reportes. |
+| `banco` | `Banco2026!` | Operador bancario | Consulta y carga de archivos bancarios. |
+| `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |
+
+Estas credenciales son exclusivamente de desarrollo. En producción, los usuarios y sus contraseñas deben almacenarse de forma persistente y gestionarse mediante un proceso seguro.
+
+## Sesiones y seguridad
+
+- Las contraseñas locales se verifican con PBKDF2-SHA256.
+- La sesión se guarda en una cookie `HttpOnly`, `SameSite=Strict`, firmada con HMAC-SHA256 y válida durante ocho horas.
+- En producción configure un secreto aleatorio, único y protegido:
+
+```bash
+SIC_SESSION_SECRET="un-secreto-largo-y-aleatorio"
+```
+
+No use el secreto de respaldo de `lib/auth.ts` fuera del entorno local. HTTPS forzado, rotación de sesiones, gestión persistente de usuarios y auditoría persistente siguen pendientes.
+
+## Base de datos y catálogo
+
+El esquema está en `db/schema.ts`; la migración inicial es `drizzle/0000_cuentas_contables.sql`. Define `cuentas_contables` con código de ocho caracteres, descripción, nivel, cuenta padre, indicador de movimiento, naturaleza, estado y clasificación de flujo.
+
+El código espera un binding Cloudflare D1 llamado `DB`. Para habilitarlo:
+
+1. Cree una base D1 en Cloudflare.
+2. Especifique `"DB"` en el campo `d1` de `.openai/hosting.json`.
+3. Aplique la migración inicial mediante el flujo de migraciones de Cloudflare.
+
+Actualmente `.openai/hosting.json` mantiene `d1` y `r2` en `null`; por ello, la persistencia no está habilitada. El catálogo fuente de 761 filas tampoco forma parte del repositorio y debe validarse e importarse antes de usarlo por completo.
+
+## Estructura
+
+```text
+app/                 Interfaz principal y rutas API
+  api/auth/          Inicio, consulta y cierre de sesión
+  api/banco/         Consulta y carga de reportes bancarios
+  api/reportes/      Generación y descarga de reportes
+  api/auditoria/     Consulta de eventos de auditoría
+db/                  Esquema Drizzle y acceso a D1
+drizzle/             Migraciones SQL
+lib/                 Autenticación y lógica de reportes
+worker/              Entrada de Cloudflare Worker
+public/              Recursos estáticos
+tests/               Pruebas automatizadas
+```
+
+## Rutas API
+
+| Ruta | Método | Función |
+| --- | --- | --- |
+| `/api/auth/login` | `POST` | Autentica y crea la sesión. |
+| `/api/auth/me` | `GET` | Devuelve la sesión actual. |
+| `/api/auth/logout` | `POST` | Elimina la sesión. |
+| `/api/banco/reportes` | `GET`, `POST` | Consulta o recibe archivos bancarios. |
+| `/api/reportes` | `GET` | Consulta reportes disponibles. |
+| `/api/reportes/:tipo` | `GET` | Genera un reporte y permite salida CSV. |
+| `/api/auditoria` | `GET` | Consulta eventos de auditoría. |
+
+Las rutas se orientan a demostración. Revise sus manejadores antes de conectar datos institucionales o publicar la aplicación.
+
+## Validación y limitaciones
+
+Antes de integrar cambios, ejecute:
+
+```bash
+pnpm lint
+pnpm build
+```
+
+`pnpm test` está disponible, pero las pruebas actuales parecen heredadas de una plantilla de vista previa y no reflejan completamente la interfaz SIC; deben actualizarse antes de utilizarlas como criterio de aceptación.
+
+Pendiente para producción: persistencia de usuarios, movimientos y auditoría; D1 configurado y migrado; importadores validados; reglas de conciliación; autorización de servidor en operaciones sensibles; pruebas alineadas; secretos, HTTPS, monitoreo y respaldos.
+
+## Soporte
+
+Al informar un incidente, incluya comando ejecutado, versiones de Node y pnpm, navegador, error completo y pasos para reproducirlo. Nunca comparta contraseñas, cookies, secretos ni datos financieros reales.
