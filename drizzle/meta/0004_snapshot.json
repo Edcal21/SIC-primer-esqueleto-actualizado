@@ -1,0 +1,674 @@
+{
+  "id": "755bfacb-12d0-410c-a11b-c53daf08ba34",
+  "prevId": "10aa78ab-20f7-4111-b869-f6223076d6c6",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.cuentas_contables": {
+      "name": "cuentas_contables",
+      "schema": "",
+      "columns": {
+        "codigo": {
+          "name": "codigo",
+          "type": "varchar(8)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nivel": {
+          "name": "nivel",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cuenta_padre": {
+          "name": "cuenta_padre",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "es_cuenta_movimiento": {
+          "name": "es_cuenta_movimiento",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "naturaleza": {
+          "name": "naturaleza",
+          "type": "varchar(9)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estado": {
+          "name": "estado",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'activa'"
+        },
+        "clasificacion_flujo": {
+          "name": "clasificacion_flujo",
+          "type": "varchar(14)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'no aplica'"
+        }
+      },
+      "indexes": {
+        "ux_cuentas_contables_codigo": {
+          "name": "ux_cuentas_contables_codigo",
+          "columns": [
+            {
+              "expression": "codigo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_cuentas_contables_padre": {
+          "name": "idx_cuentas_contables_padre",
+          "columns": [
+            {
+              "expression": "cuenta_padre",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_cuentas_contables_movimiento_estado": {
+          "name": "idx_cuentas_contables_movimiento_estado",
+          "columns": [
+            {
+              "expression": "es_cuenta_movimiento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "fk_cuentas_contables_padre": {
+          "name": "fk_cuentas_contables_padre",
+          "tableFrom": "cuentas_contables",
+          "tableTo": "cuentas_contables",
+          "columnsFrom": [
+            "cuenta_padre"
+          ],
+          "columnsTo": [
+            "codigo"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_cuentas_contables_codigo_8": {
+          "name": "ck_cuentas_contables_codigo_8",
+          "value": "length(\"cuentas_contables\".\"codigo\") = 8"
+        },
+        "ck_cuentas_contables_nivel": {
+          "name": "ck_cuentas_contables_nivel",
+          "value": "\"cuentas_contables\".\"nivel\" between 1 and 5"
+        },
+        "ck_cuentas_contables_naturaleza": {
+          "name": "ck_cuentas_contables_naturaleza",
+          "value": "\"cuentas_contables\".\"naturaleza\" in ('deudora', 'acreedora')"
+        },
+        "ck_cuentas_contables_estado": {
+          "name": "ck_cuentas_contables_estado",
+          "value": "\"cuentas_contables\".\"estado\" in ('activa', 'inactiva')"
+        },
+        "ck_cuentas_contables_flujo": {
+          "name": "ck_cuentas_contables_flujo",
+          "value": "\"cuentas_contables\".\"clasificacion_flujo\" in ('operación', 'inversión', 'financiamiento', 'no aplica')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.detalles_movimientos": {
+      "name": "detalles_movimientos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "movimiento_id": {
+          "name": "movimiento_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cuenta_codigo": {
+          "name": "cuenta_codigo",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cuenta_nombre": {
+          "name": "cuenta_nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monto": {
+          "name": "monto",
+          "type": "numeric(18, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "orden": {
+          "name": "orden",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "idx_detalles_movimientos_movimiento": {
+          "name": "idx_detalles_movimientos_movimiento",
+          "columns": [
+            {
+              "expression": "movimiento_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_detalles_movimientos_cuenta": {
+          "name": "idx_detalles_movimientos_cuenta",
+          "columns": [
+            {
+              "expression": "cuenta_codigo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_detalles_movimientos_tipo": {
+          "name": "idx_detalles_movimientos_tipo",
+          "columns": [
+            {
+              "expression": "tipo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "detalles_movimientos_movimiento_id_movimientos_cuentas_id_fk": {
+          "name": "detalles_movimientos_movimiento_id_movimientos_cuentas_id_fk",
+          "tableFrom": "detalles_movimientos",
+          "tableTo": "movimientos_cuentas",
+          "columnsFrom": [
+            "movimiento_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_detalles_movimientos_tipo": {
+          "name": "ck_detalles_movimientos_tipo",
+          "value": "\"detalles_movimientos\".\"tipo\" in ('credito', 'debito')"
+        },
+        "ck_detalles_movimientos_monto": {
+          "name": "ck_detalles_movimientos_monto",
+          "value": "\"detalles_movimientos\".\"monto\" > 0"
+        },
+        "ck_detalles_movimientos_orden": {
+          "name": "ck_detalles_movimientos_orden",
+          "value": "\"detalles_movimientos\".\"orden\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.movimientos_cuentas": {
+      "name": "movimientos_cuentas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "fecha": {
+          "name": "fecha",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "referencia": {
+          "name": "referencia",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "concepto": {
+          "name": "concepto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estado": {
+          "name": "estado",
+          "type": "varchar(12)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'registrado'"
+        },
+        "creado_por": {
+          "name": "creado_por",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_movimientos_cuentas_fecha": {
+          "name": "idx_movimientos_cuentas_fecha",
+          "columns": [
+            {
+              "expression": "fecha",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_movimientos_cuentas_referencia": {
+          "name": "idx_movimientos_cuentas_referencia",
+          "columns": [
+            {
+              "expression": "referencia",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_movimientos_cuentas_estado": {
+          "name": "idx_movimientos_cuentas_estado",
+          "columns": [
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "movimientos_cuentas_creado_por_usuarios_id_fk": {
+          "name": "movimientos_cuentas_creado_por_usuarios_id_fk",
+          "tableFrom": "movimientos_cuentas",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "creado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_movimientos_cuentas_estado": {
+          "name": "ck_movimientos_cuentas_estado",
+          "value": "\"movimientos_cuentas\".\"estado\" in ('registrado', 'anulado')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.permisos": {
+      "name": "permisos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(80)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.roles": {
+      "name": "roles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(40)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.roles_permisos": {
+      "name": "roles_permisos",
+      "schema": "",
+      "columns": {
+        "rol_id": {
+          "name": "rol_id",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "permiso_id": {
+          "name": "permiso_id",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_roles_permisos_permiso": {
+          "name": "idx_roles_permisos_permiso",
+          "columns": [
+            {
+              "expression": "permiso_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "roles_permisos_rol_id_roles_id_fk": {
+          "name": "roles_permisos_rol_id_roles_id_fk",
+          "tableFrom": "roles_permisos",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "rol_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "roles_permisos_permiso_id_permisos_id_fk": {
+          "name": "roles_permisos_permiso_id_permisos_id_fk",
+          "tableFrom": "roles_permisos",
+          "tableTo": "permisos",
+          "columnsFrom": [
+            "permiso_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "pk_roles_permisos": {
+          "name": "pk_roles_permisos",
+          "columns": [
+            "rol_id",
+            "permiso_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.usuarios": {
+      "name": "usuarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(40)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "usuario": {
+          "name": "usuario",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rol_id": {
+          "name": "rol_id",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "salt": {
+          "name": "salt",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estado": {
+          "name": "estado",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'activo'"
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ux_usuarios_usuario": {
+          "name": "ux_usuarios_usuario",
+          "columns": [
+            {
+              "expression": "usuario",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_usuarios_rol_estado": {
+          "name": "idx_usuarios_rol_estado",
+          "columns": [
+            {
+              "expression": "rol_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "usuarios_rol_id_roles_id_fk": {
+          "name": "usuarios_rol_id_roles_id_fk",
+          "tableFrom": "usuarios",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "rol_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_usuarios_estado": {
+          "name": "ck_usuarios_estado",
+          "value": "\"usuarios\".\"estado\" in ('activo', 'inactivo')"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

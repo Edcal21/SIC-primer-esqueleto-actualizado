@@ -1,4 +1,4 @@
-import { boolean, check, foreignKey, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, date, foreignKey, index, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const roles = pgTable("roles", {
@@ -33,6 +33,38 @@ export const usuarios = pgTable("usuarios", {
   uniqueIndex("ux_usuarios_usuario").on(table.usuario),
   index("idx_usuarios_rol_estado").on(table.rolId, table.estado),
   check("ck_usuarios_estado", sql`${table.estado} in ('activo', 'inactivo')`),
+]);
+
+export const movimientosCuentas = pgTable("movimientos_cuentas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fecha: date("fecha").notNull(),
+  referencia: varchar("referencia", { length: 120 }),
+  concepto: text("concepto").notNull(),
+  estado: varchar("estado", { length: 12, enum: ["registrado", "anulado"] }).notNull().default("registrado"),
+  creadoPor: varchar("creado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_movimientos_cuentas_fecha").on(table.fecha),
+  index("idx_movimientos_cuentas_referencia").on(table.referencia),
+  index("idx_movimientos_cuentas_estado").on(table.estado),
+  check("ck_movimientos_cuentas_estado", sql`${table.estado} in ('registrado', 'anulado')`),
+]);
+
+export const detallesMovimientos = pgTable("detalles_movimientos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  movimientoId: uuid("movimiento_id").notNull().references(() => movimientosCuentas.id, { onDelete: "cascade" }),
+  tipo: varchar("tipo", { length: 7, enum: ["credito", "debito"] }).notNull(),
+  cuentaCodigo: varchar("cuenta_codigo", { length: 40 }).notNull(),
+  cuentaNombre: text("cuenta_nombre").notNull(),
+  monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+  orden: integer("orden").notNull().default(1),
+}, (table) => [
+  index("idx_detalles_movimientos_movimiento").on(table.movimientoId),
+  index("idx_detalles_movimientos_cuenta").on(table.cuentaCodigo),
+  index("idx_detalles_movimientos_tipo").on(table.tipo),
+  check("ck_detalles_movimientos_tipo", sql`${table.tipo} in ('credito', 'debito')`),
+  check("ck_detalles_movimientos_monto", sql`${table.monto} > 0`),
+  check("ck_detalles_movimientos_orden", sql`${table.orden} > 0`),
 ]);
 
 export const cuentasContables = pgTable("cuentas_contables", {

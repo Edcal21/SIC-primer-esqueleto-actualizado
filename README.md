@@ -80,7 +80,7 @@ No use el secreto de respaldo de `lib/auth.ts` fuera del entorno local. HTTPS fo
 
 ## Base de datos y catálogo
 
-El esquema PostgreSQL está en `db/schema.ts` y las migraciones versionadas están en `drizzle/`. Define `cuentas_contables` con código de ocho caracteres, descripción, nivel, cuenta padre, indicador de movimiento, naturaleza, estado y clasificación de flujo.
+El esquema PostgreSQL está en `db/schema.ts` y las migraciones versionadas están en `drizzle/`. El catálogo se mantiene en `cuentas_contables`. Los asientos se guardan independientemente en `movimientos_cuentas` y sus líneas de crédito o débito en `detalles_movimientos`; esta última conserva el código y nombre de cuenta sin depender de una clave foránea al catálogo.
 
 En Windows, con PostgreSQL instalado, ejecute desde la raíz:
 
@@ -99,6 +99,7 @@ El catálogo fuente de 761 filas no forma parte del repositorio y debe validarse
 ```text
 app/                 Interfaz principal y rutas API
   api/auth/          Inicio, consulta y cierre de sesión
+  api/movimientos/   Registro y consulta de movimientos contables
   api/banco/         Consulta y carga de reportes bancarios
   api/reportes/      Generación y descarga de reportes
   api/auditoria/     Consulta de eventos de auditoría
@@ -117,6 +118,7 @@ tests/               Pruebas automatizadas
 | `/api/auth/login` | `POST` | Autentica y crea la sesión. |
 | `/api/auth/me` | `GET` | Devuelve la sesión actual. |
 | `/api/auth/logout` | `POST` | Elimina la sesión. |
+| `/api/movimientos` | `GET`, `POST` | Consulta o registra encabezados y detalles de movimientos. |
 | `/api/banco/reportes` | `GET`, `POST` | Consulta o recibe archivos bancarios. |
 | `/api/reportes` | `GET` | Consulta reportes disponibles. |
 | `/api/reportes/:tipo` | `GET` | Genera un reporte y permite salida CSV. |

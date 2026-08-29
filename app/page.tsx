@@ -67,7 +67,40 @@ function Modulo({ nombre, user }: { nombre: string; user: User }) {
   return <><div className="pageHead"><div><span className="eyebrow">{nombresRol[user.rol].toUpperCase()}</span><h1>{title}</h1><p>{description}</p></div></div><section className="metrics"><article className="metric featured"><p>Rol activo</p><strong>{nombresRol[user.rol]}</strong><span className="pill ready">Sesión válida</span></article><article className="metric"><p>Módulos disponibles</p><strong>{menu.filter(item=>user.permisos.includes(item.permiso)).length}</strong><small>Según permisos</small></article><article className="metric"><p>Conciliación bancaria</p><strong>94.7%</strong><div className="progress"><i style={{width:"94.7%"}}/></div></article><article className="metric"><p>Período</p><strong>Junio 2026</strong><span className="pill ready">Abierto</span></article></section></>;
 }
 
-function Movimiento({ notify }: { notify: (message: string) => void }) { return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Esta vista solo existe para el Contador general.</p></div></div><section className="panel formPanel"><div className="formGrid"><label>Fecha<input type="date" defaultValue="2026-06-26"/></label><label>Tipo<select><option>Ingreso</option><option>Egreso</option></select></label><label className="wide">Cuenta<select><option>11010201 · BAC Credomatic</option><option>41010101 · Ofrendas recibidas</option></select></label><label>Referencia<input placeholder="Número de minuta"/></label><label>Monto C$<input type="number" min="0" step="0.01"/></label><label className="wide">Concepto<textarea/></label></div><div className="formActions"><button className="primary" onClick={()=>notify("Movimiento validado")}>Guardar movimiento</button></div></section></> }
+function Movimiento({ notify }: { notify: (message: string) => void }) {
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function guardar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const cuenta = String(form.get("cuenta") ?? "").split("|");
+    const response = await fetch("/api/movimientos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fecha: form.get("fecha"),
+        referencia: form.get("referencia"),
+        concepto: form.get("concepto"),
+        detalles: [{
+          tipo: form.get("tipo"),
+          cuentaCodigo: cuenta[0],
+          cuentaNombre: cuenta[1],
+          monto: form.get("monto"),
+        }],
+      }),
+    });
+    const result = await response.json();
+    setSaving(false);
+    if (!response.ok) return setError(result.error ?? "No se pudo guardar el movimiento");
+    formElement.reset();
+    notify("Movimiento guardado en PostgreSQL");
+  }
+
+  return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre débitos y créditos para su posterior conciliación.</p></div></div><form className="panel formPanel" onSubmit={guardar}><div className="formGrid"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Tipo<select name="tipo" required><option value="debito">Débito</option><option value="credito">Crédito</option></select></label><label className="wide">Cuenta<select name="cuenta" required><option value="11010201|BAC Credomatic">11010201 · BAC Credomatic</option><option value="41010101|Ofrendas recibidas">41010101 · Ofrendas recibidas</option></select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label>Monto C$<input name="monto" type="number" required min="0.01" step="0.01"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div>{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
+}
 
 function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
@@ -88,7 +121,7 @@ function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
     setPermisos(rolesData.permisos ?? []);
   }
 
-  useEffect(() => { cargarDatos(); }, []);
+  useEffect(() => { void Promise.resolve().then(cargarDatos); }, []);
 
   async function crearUsuario(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
