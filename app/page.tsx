@@ -13,6 +13,7 @@ type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
+type CuentaMovimiento = { codigo: string; descripcion: string; naturaleza: "deudora" | "acreedora"; clasificacionFlujo: string };
 
 const nombresRol = { administrador: "Administrador", contador_general: "Contador general", operador_bancario: "Operador bancario", auditor_general: "Auditor general" };
 const etiquetasPermiso: Record<Permiso, string> = {
@@ -84,15 +85,32 @@ function Modulo({ nombre, user }: { nombre: string; user: User }) {
 }
 
 function Movimiento({ notify }: { notify: (message: string) => void }) {
+  const [cuentas, setCuentas] = useState<CuentaMovimiento[]>([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/catalogo/cuentas")
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "No se pudo cargar el catálogo contable");
+        setCuentas(data.cuentas ?? []);
+      })
+      .catch(error => setError(error.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   async function guardar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true); setError("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const cuenta = String(form.get("cuenta") ?? "").split("|");
+    const cuenta = cuentas.find(item => item.codigo === String(form.get("cuenta") ?? ""));
+    if (!cuenta) {
+      setSaving(false);
+      return setError("Seleccione una cuenta activa del catálogo contable");
+    }
     const response = await fetch("/api/movimientos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -102,8 +120,8 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
         concepto: form.get("concepto"),
         detalles: [{
           tipo: form.get("tipo"),
-          cuentaCodigo: cuenta[0],
-          cuentaNombre: cuenta[1],
+          cuentaCodigo: cuenta.codigo,
+          cuentaNombre: cuenta.descripcion,
           monto: form.get("monto"),
         }],
       }),
@@ -115,7 +133,7 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
     notify("Movimiento guardado en PostgreSQL");
   }
 
-  return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre débitos y créditos para su posterior conciliación.</p></div></div><form className="panel formPanel" onSubmit={guardar}><div className="formGrid"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Tipo<select name="tipo" required><option value="debito">Débito</option><option value="credito">Crédito</option></select></label><label className="wide">Cuenta<select name="cuenta" required><option value="11010201|BAC Credomatic">11010201 · BAC Credomatic</option><option value="41010101|Ofrendas recibidas">41010101 · Ofrendas recibidas</option></select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label>Monto C$<input name="monto" type="number" required min="0.01" step="0.01"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div>{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
+  return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre débitos y créditos usando cuentas activas del catálogo contable.</p></div></div>{!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}<form className="panel formPanel" onSubmit={guardar}><div className="formGrid"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Tipo<select name="tipo" required><option value="debito">Débito</option><option value="credito">Crédito</option></select></label><label className="wide">Cuenta<select name="cuenta" required disabled={loading || !cuentas.length}><option value="">{loading ? "Cargando catálogo..." : "Seleccione una cuenta"}</option>{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.codigo} · {cuenta.descripcion} · {cuenta.naturaleza}</option>)}</select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label>Monto C$<input name="monto" type="number" required min="0.01" step="0.01"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div>{cuentas.length ? <div className="accountHint">{cuentas.length} cuentas de movimiento disponibles desde PostgreSQL.</div> : null}{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving || loading || !cuentas.length}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
 }
 
 function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
