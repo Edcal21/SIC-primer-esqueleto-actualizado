@@ -40,8 +40,8 @@ CREATE UNIQUE INDEX "ux_usuarios_usuario" ON "usuarios" USING btree ("usuario");
 CREATE INDEX "idx_usuarios_rol_estado" ON "usuarios" USING btree ("rol_id","estado");
 --> statement-breakpoint
 INSERT INTO "roles" ("id", "nombre", "descripcion") VALUES
-	('contador_general', 'Contador general', 'Acceso operativo contable completo.'),
-	('operador_bancario', 'Operador bancario', 'Consulta y carga de reportes bancarios.'),
+	('contador_general', 'Contador general', 'Importa balanza de comprobación y descarga reportes.'),
+	('operador_bancario', 'Operador bancario', 'Registra minutas y consulta/carga reportes bancarios.'),
 	('auditor_general', 'Auditor general', 'Consulta de reportes, bancos y auditoría.');
 --> statement-breakpoint
 INSERT INTO "permisos" ("id", "descripcion") VALUES
@@ -58,15 +58,11 @@ INSERT INTO "permisos" ("id", "descripcion") VALUES
 --> statement-breakpoint
 INSERT INTO "roles_permisos" ("rol_id", "permiso_id") VALUES
 	('contador_general', 'panel:ver'),
-	('contador_general', 'movimientos:escribir'),
-	('contador_general', 'catalogo:administrar'),
-	('contador_general', 'banco:ver'),
-	('contador_general', 'banco:cargar'),
-	('contador_general', 'conciliacion:aprobar'),
 	('contador_general', 'importaciones:administrar'),
 	('contador_general', 'reportes:ver'),
 	('contador_general', 'reportes:descargar'),
 	('operador_bancario', 'panel:ver'),
+	('operador_bancario', 'movimientos:escribir'),
 	('operador_bancario', 'banco:ver'),
 	('operador_bancario', 'banco:cargar'),
 	('operador_bancario', 'reportes:ver'),
