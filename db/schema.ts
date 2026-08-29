@@ -144,3 +144,18 @@ export const auditoriaEventos = pgTable("auditoria_eventos", {
   index("idx_auditoria_eventos_modulo").on(table.modulo),
   check("ck_auditoria_eventos_resultado", sql`${table.resultado} in ('correcto', 'error')`),
 ]);
+
+export const reportesBancarios = pgTable("reportes_bancarios", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nombre: text("nombre").notNull(),
+  fecha: date("fecha").notNull().defaultNow(),
+  estado: varchar("estado", { length: 12, enum: ["recibido", "procesado", "error"] }).notNull().default("recibido"),
+  archivoTamano: integer("archivo_tamano").notNull(),
+  cargadoPor: varchar("cargado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  cargadoPorNombre: text("cargado_por_nombre").notNull(),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_reportes_bancarios_fecha").on(table.fecha),
+  index("idx_reportes_bancarios_usuario").on(table.cargadoPor),
+  check("ck_reportes_bancarios_estado", sql`${table.estado} in ('recibido', 'procesado', 'error')`),
+]);

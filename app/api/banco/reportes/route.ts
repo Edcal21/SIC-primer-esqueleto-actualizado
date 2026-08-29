@@ -1,12 +1,24 @@
+import { desc } from "drizzle-orm";
+import { getDb } from "../../../../db";
+import { reportesBancarios } from "../../../../db/schema";
+import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
-
-const reportes = [{ id: "rb-001", nombre: "Estado de cuenta BAC - junio 2026.csv", fecha: "2026-06-30", estado: "Procesado", cargadoPor: "Operador Bancario" }];
 
 export async function GET(request: Request) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
   if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
-  return Response.json({ reportes });
+  const db = getDb();
+  const rows = await db.select().from(reportesBancarios).orderBy(desc(reportesBancarios.creadoEn)).limit(50);
+  return Response.json({
+    reportes: rows.map(row => ({
+      id: row.id,
+      nombre: row.nombre,
+      fecha: row.fecha,
+      estado: row.estado,
+      cargadoPor: row.cargadoPorNombre,
+    })),
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
@@ -17,5 +29,27 @@ export async function POST(request: Request) {
   if (!(archivo instanceof File) || !archivo.name) return jsonError("Seleccione un archivo", 400);
   if (archivo.size > 10 * 1024 * 1024) return jsonError("El archivo supera el límite de 10 MB", 413);
   if (!/\.(csv|xlsx|xls)$/i.test(archivo.name)) return jsonError("Formato no permitido; use CSV o Excel", 415);
-  return Response.json({ reporte: { id: `rb-${Date.now()}`, nombre: archivo.name, fecha: new Date().toISOString().slice(0, 10), estado: "Recibido", cargadoPor: user.nombre } }, { status: 201 });
+  const db = getDb();
+  try {
+    const [reporte] = await db.insert(reportesBancarios).values({
+      nombre: archivo.name,
+      fecha: new Date().toISOString().slice(0, 10),
+      archivoTamano: archivo.size,
+      cargadoPor: user.id,
+      cargadoPorNombre: user.nombre,
+    }).returning();
+    await registrarAuditoria(db, { user, modulo: "Bancos", accion: "Cargó reporte bancario", entidad: "reportes_bancarios", entidadId: reporte.id, detalle: archivo.name });
+    return Response.json({
+      reporte: {
+        id: reporte.id,
+        nombre: reporte.nombre,
+        fecha: reporte.fecha,
+        estado: reporte.estado,
+        cargadoPor: reporte.cargadoPorNombre,
+      },
+    }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Bank report upload failed", error);
+    return jsonError("No se pudo guardar el reporte bancario", 500);
+  }
 }
