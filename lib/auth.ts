@@ -3,19 +3,21 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { rolesPermisos, usuarios as usuariosTable } from "../db/schema";
 
-export type RolId = "contador_general" | "operador_bancario" | "auditor_general";
-export type Permiso = "panel:ver" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
+export type RolId = "administrador" | "contador_general" | "operador_bancario" | "auditor_general";
+export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
 
 export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[] };
 type UsuarioInterno = UsuarioSesion & { salt: string; passwordHash: string };
 
 const permisosPorRol: Record<RolId, Permiso[]> = {
+  administrador: ["panel:ver", "usuarios:administrar", "roles:administrar", "auditoria:ver"],
   contador_general: ["panel:ver", "movimientos:escribir", "catalogo:administrar", "banco:ver", "banco:cargar", "conciliacion:aprobar", "importaciones:administrar", "reportes:ver", "reportes:descargar"],
   operador_bancario: ["panel:ver", "banco:ver", "banco:cargar", "reportes:ver"],
   auditor_general: ["panel:ver", "banco:ver", "reportes:ver", "reportes:descargar", "auditoria:ver"],
 };
 
 const usuariosLocales: UsuarioInterno[] = [
+  { id: "usr-admin", usuario: "administrador", nombre: "Administrador del Sistema", rol: "administrador", permisos: permisosPorRol.administrador, salt: "4836377235e90964097682ebfda61e05", passwordHash: "d913ff8d9bf0ca9a71ce0d5625886395f1f32922d52ae740513f870ae5227ddd" },
   { id: "usr-contador", usuario: "contador", nombre: "Contador General", rol: "contador_general", permisos: permisosPorRol.contador_general, salt: "b04259fa5a05cd95fda1a4af06b926d8", passwordHash: "a84233f4147da5048daef1e3d0d875df1d9ad96a9b77b35c399001793f9b5253" },
   { id: "usr-banco", usuario: "banco", nombre: "Operador Bancario", rol: "operador_bancario", permisos: permisosPorRol.operador_bancario, salt: "cd15b6c7a108464a98ed72733da083aa", passwordHash: "07ec8bed948731f1ccb8d4f5e49ac38ed62eab2f213cbb120950d2f9233525cc" },
   { id: "usr-auditor", usuario: "auditor", nombre: "Auditor General", rol: "auditor_general", permisos: permisosPorRol.auditor_general, salt: "1ae524d779667e6470265d096ab2efec", passwordHash: "563dff2b46b224cec7a76817f514431c2167f0a7c05ca16db989ba01013670ba" },

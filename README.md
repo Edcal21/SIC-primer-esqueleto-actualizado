@@ -59,6 +59,7 @@ Los usuarios locales están definidos en `lib/auth.ts`:
 
 | Usuario | Contraseña | Rol | Acceso |
 | --- | --- | --- | --- |
+| `administrador` | `Admin2026!` | Administrador | Administración de usuarios, roles y auditoría. |
 | `contador` | `Conta2026!` | Contador general | Movimientos, catálogo, bancos, importaciones y reportes. |
 | `banco` | `Banco2026!` | Operador bancario | Consulta y carga de archivos bancarios. |
 | `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |

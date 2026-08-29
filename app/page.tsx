@@ -2,17 +2,18 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-type Permiso = "panel:ver" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
-type User = { id: string; usuario: string; nombre: string; rol: "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
+type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
+type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
 type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string };
 type Evento = { fecha: string; usuario: string; accion: string; resultado: string };
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
 
-const nombresRol = { contador_general: "Contador general", operador_bancario: "Operador bancario", auditor_general: "Auditor general" };
+const nombresRol = { administrador: "Administrador", contador_general: "Contador general", operador_bancario: "Operador bancario", auditor_general: "Auditor general" };
 const menu = [
   { nombre: "Resumen", permiso: "panel:ver" as Permiso, icono: "⌂" },
+  { nombre: "Usuarios", permiso: "usuarios:administrar" as Permiso, icono: "◉" },
   { nombre: "Registrar movimiento", permiso: "movimientos:escribir" as Permiso, icono: "＋" },
   { nombre: "Catálogo contable", permiso: "catalogo:administrar" as Permiso, icono: "☷" },
   { nombre: "Bancos", permiso: "banco:ver" as Permiso, icono: "⇄" },
@@ -38,7 +39,7 @@ export default function Home() {
     const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ usuario: form.get("usuario"), password: form.get("password") }) });
     const result = await response.json();
     if (!response.ok) return setError(result.error);
-    setUser(result.user); setActive(result.user.rol === "operador_bancario" ? "Bancos" : result.user.rol === "auditor_general" ? "Auditoría" : "Resumen");
+    setUser(result.user); setActive(result.user.rol === "administrador" ? "Usuarios" : result.user.rol === "operador_bancario" ? "Bancos" : result.user.rol === "auditor_general" ? "Auditoría" : "Resumen");
   }
 
   async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setUser(null); setActive("Resumen"); }
@@ -54,11 +55,11 @@ export default function Home() {
 }
 
 function Login({ onSubmit, error }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string }) {
-  return <main className="authScreen"><section className="authCard"><div className="authBrand"><span className="brandMark">S</span><div><b>SIC</b><small>Sistema de Información Contable</small></div></div><span className="eyebrow">ACCESO SEGURO</span><h1>Iniciar sesión</h1><p>Ingrese con el usuario asignado a su función.</p><form onSubmit={onSubmit}><label>Usuario<input name="usuario" autoComplete="username" required placeholder="contador, banco o auditor"/></label><label>Contraseña<input name="password" type="password" autoComplete="current-password" required placeholder="••••••••••"/></label>{error ? <div className="authError" role="alert">{error}</div> : null}<button className="primary" type="submit">Ingresar al SIC</button></form><div className="demoUsers"><b>Usuarios iniciales</b><span>contador / Conta2026!</span><span>banco / Banco2026!</span><span>auditor / Audit2026!</span></div></section></main>;
+  return <main className="authScreen"><section className="authCard"><div className="authBrand"><span className="brandMark">S</span><div><b>SIC</b><small>Sistema de Información Contable</small></div></div><span className="eyebrow">ACCESO SEGURO</span><h1>Iniciar sesión</h1><p>Ingrese con el usuario asignado a su función.</p><form onSubmit={onSubmit}><label>Usuario<input name="usuario" autoComplete="username" required placeholder="administrador, contador, banco o auditor"/></label><label>Contraseña<input name="password" type="password" autoComplete="current-password" required placeholder="••••••••••"/></label>{error ? <div className="authError" role="alert">{error}</div> : null}<button className="primary" type="submit">Ingresar al SIC</button></form><div className="demoUsers"><b>Usuarios iniciales</b><span>administrador / Admin2026!</span><span>contador / Conta2026!</span><span>banco / Banco2026!</span><span>auditor / Audit2026!</span></div></section></main>;
 }
 
 function Modulo({ nombre, user }: { nombre: string; user: User }) {
-  const textos: Record<string, [string,string]> = { Resumen:["Panel general",`Vista operativa para ${nombresRol[user.rol]}.`], "Catálogo contable":["Catálogo contable","Administración de cuentas y estructura jerárquica."], Importaciones:["Importaciones contables","Carga de catálogo, balanza y auxiliares."], Reportes:["Centro de reportes","Consulta de estados financieros autorizados."] };
+  const textos: Record<string, [string,string]> = { Resumen:["Panel general",`Vista operativa para ${nombresRol[user.rol]}.`], Usuarios:["Administración de usuarios","Control de usuarios, roles y perfiles del sistema."], "Catálogo contable":["Catálogo contable","Administración de cuentas y estructura jerárquica."], Importaciones:["Importaciones contables","Carga de catálogo, balanza y auxiliares."], Reportes:["Centro de reportes","Consulta de estados financieros autorizados."] };
   const [title, description] = textos[nombre] ?? [nombre,"Módulo autorizado para su perfil."];
   return <><div className="pageHead"><div><span className="eyebrow">{nombresRol[user.rol].toUpperCase()}</span><h1>{title}</h1><p>{description}</p></div></div><section className="metrics"><article className="metric featured"><p>Rol activo</p><strong>{nombresRol[user.rol]}</strong><span className="pill ready">Sesión válida</span></article><article className="metric"><p>Módulos disponibles</p><strong>{menu.filter(item=>user.permisos.includes(item.permiso)).length}</strong><small>Según permisos</small></article><article className="metric"><p>Conciliación bancaria</p><strong>94.7%</strong><div className="progress"><i style={{width:"94.7%"}}/></div></article><article className="metric"><p>Período</p><strong>Junio 2026</strong><span className="pill ready">Abierto</span></article></section></>;
 }
