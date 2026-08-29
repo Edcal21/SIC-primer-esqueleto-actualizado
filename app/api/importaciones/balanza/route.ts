@@ -5,6 +5,7 @@ import { importacionesBalanza, lineasBalanza } from "../../../../db/schema";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 
 type RawRow = Record<string, unknown>;
+type SheetRow = unknown[];
 type BalanzaRow = {
   numeroLinea: number;
   cuentaCodigo: string;
@@ -18,8 +19,8 @@ const periodoRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
 const headerAliases = {
   codigo: ["codigo", "código", "cuenta", "cuenta codigo", "cuenta código", "codigo cuenta", "código cuenta"],
   nombre: ["descripcion", "descripción", "nombre", "cuenta nombre", "nombre cuenta"],
-  debe: ["debe", "debito", "débito", "cargo", "deudor"],
-  haber: ["haber", "credito", "crédito", "abono", "acreedor"],
+  debe: ["debe", "debito", "débito", "debitos", "débitos", "cargo", "deudor"],
+  haber: ["haber", "credito", "crédito", "creditos", "créditos", "abono", "acreedor"],
   saldo: ["saldo", "saldo final", "saldo actual"],
 };
 
@@ -42,6 +43,26 @@ function buscarValor(row: RawRow, aliases: string[]) {
   const entries = Object.entries(row).map(([key, value]) => [normalizarHeader(key), value] as const);
   const normalizedAliases = aliases.map(normalizarHeader);
   return entries.find(([key]) => normalizedAliases.includes(key))?.[1];
+}
+
+function filasConEncabezado(rows: SheetRow[]): RawRow[] {
+  const normalizedAliases = {
+    codigo: headerAliases.codigo.map(normalizarHeader),
+    nombre: headerAliases.nombre.map(normalizarHeader),
+    debe: headerAliases.debe.map(normalizarHeader),
+    haber: headerAliases.haber.map(normalizarHeader),
+  };
+  const headerIndex = rows.findIndex(row => {
+    const headers = row.map(cell => normalizarHeader(valorTexto(cell))).filter(Boolean);
+    return normalizedAliases.codigo.some(alias => headers.includes(alias))
+      && normalizedAliases.nombre.some(alias => headers.includes(alias))
+      && normalizedAliases.debe.some(alias => headers.includes(alias))
+      && normalizedAliases.haber.some(alias => headers.includes(alias));
+  });
+  if (headerIndex === -1) throw new Error("No se encontraron encabezados de balanza: Cuenta, Descripción, Débitos y Créditos");
+
+  const headers = rows[headerIndex].map(cell => valorTexto(cell));
+  return rows.slice(headerIndex + 1).map(row => Object.fromEntries(headers.map((header, index) => [header || `columna_${index + 1}`, row[index] ?? ""])));
 }
 
 function extraerFilas(rows: RawRow[]): BalanzaRow[] {
@@ -76,7 +97,8 @@ async function leerArchivo(archivo: File) {
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("El archivo no contiene hojas para procesar");
   const sheet = workbook.Sheets[sheetName];
-  return XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "" });
+  const rows = XLSX.utils.sheet_to_json<SheetRow>(sheet, { header: 1, defval: "" });
+  return filasConEncabezado(rows);
 }
 
 export async function GET(request: Request) {

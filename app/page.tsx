@@ -6,6 +6,7 @@ type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "mov
 type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
 type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string };
 type Evento = { fecha: string; usuario: string; accion: string; resultado: string };
+type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: string; totalLineas: number; totalDebe: string; totalHaber: string; creadoEn: string };
 type PermisoAdmin = { id: Permiso; descripcion: string };
 type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
@@ -52,7 +53,7 @@ export default function Home() {
 
   return <main className="shell">
     <aside className="sidebar"><div className="brand"><span className="brandMark">S</span><div><b>SIC</b><small>Sistema contable</small></div></div><nav aria-label="Navegación principal"><p className="navLabel">MÓDULOS AUTORIZADOS</p>{allowedMenu.map(item=><button key={item.nombre} className={active===item.nombre?"navItem active":"navItem"} onClick={()=>setActive(item.nombre)}><span>{item.icono}</span>{item.nombre}</button>)}</nav><div className="sidebarFoot"><span className="avatar">{user.nombre.split(" ").map(word=>word[0]).slice(0,2).join("")}</span><div><b>{user.nombre}</b><small>{nombresRol[user.rol]}</small></div><button aria-label="Cerrar sesión" onClick={logout}>↪</button></div></aside>
-    <section className="workspace"><header className="topbar"><div><p>Sistema de Información Contable</p><span>Sesión protegida · {nombresRol[user.rol]}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>＋ Nuevo movimiento</button> : null}</header><div className="content">{active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
+    <section className="workspace"><header className="topbar"><div><p>Sistema de Información Contable</p><span>Sesión protegida · {nombresRol[user.rol]}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>＋ Nuevo movimiento</button> : null}</header><div className="content">{active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
     {notice ? <div className="toast">✓ {notice}</div> : null}
   </main>;
 }
@@ -203,6 +204,41 @@ function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: s
   useEffect(()=>{ fetch("/api/banco/reportes").then(r=>r.json()).then(data=>setReportes(data.reportes??[])); },[]);
   async function upload(){ if(!file) return setError("Seleccione un archivo CSV o Excel"); const form=new FormData(); form.append("archivo",file); const response=await fetch("/api/banco/reportes",{method:"POST",body:form}); const result=await response.json(); if(!response.ok)return setError(result.error); setReportes(current=>[result.reporte,...current]); setFile(null); setError(""); notify("Reporte bancario recibido"); }
   return <><div className="pageHead"><div><span className="eyebrow">BANCOS</span><h1>Reportes bancarios</h1><p>Consulta de archivos recibidos y su estado de procesamiento.</p></div></div>{canUpload?<section className="panel uploadPanel"><div><h2>Subir reporte del banco</h2><p>Formatos permitidos: CSV, XLS o XLSX · máximo 10 MB.</p></div><input type="file" accept=".csv,.xls,.xlsx" onChange={event=>setFile(event.target.files?.[0]??null)}/><button className="primary" onClick={upload}>Subir reporte</button>{error?<span className="uploadError">{error}</span>:null}</section>:<div className="readOnlyBanner">Acceso de solo lectura: puede consultar reportes, pero no cargarlos.</div>}<section className="panel tablePanel"><div className="panelHead"><div><h2>Historial bancario</h2><p>{reportes.length} archivos disponibles</p></div></div><div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>FECHA</th><th>CARGADO POR</th><th>ESTADO</th></tr></thead><tbody>{reportes.map(item=><tr key={item.id}><td><b>{item.nombre}</b></td><td>{item.fecha}</td><td>{item.cargadoPor}</td><td><span className="status done">{item.estado}</span></td></tr>)}</tbody></table></div></section></>;
+}
+
+function Importaciones({ notify }: { notify: (message: string) => void }) {
+  const [importaciones, setImportaciones] = useState<ImportacionBalanza[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [periodo, setPeriodo] = useState("2025-12");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function cargarHistorial() {
+    const response = await fetch("/api/importaciones/balanza");
+    const data = await response.json();
+    if (response.ok) setImportaciones(data.importaciones ?? []);
+    else setError(data.error ?? "No se pudo cargar el historial");
+  }
+
+  useEffect(() => { void Promise.resolve().then(cargarHistorial); }, []);
+
+  async function importar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file) return setError("Seleccione el archivo de balanza");
+    setSaving(true); setError("");
+    const form = new FormData();
+    form.append("periodo", periodo);
+    form.append("archivo", file);
+    const response = await fetch("/api/importaciones/balanza", { method: "POST", body: form });
+    const result = await response.json();
+    setSaving(false);
+    if (!response.ok) return setError(result.error ?? "No se pudo importar la balanza");
+    setImportaciones(current => [result.importacion, ...current]);
+    setFile(null);
+    notify(`Balanza importada: ${result.importacion.totalLineas} líneas`);
+  }
+
+  return <><div className="pageHead"><div><span className="eyebrow">IMPORTACIONES</span><h1>Balanza de comprobación</h1><p>Importe el Excel mensual del contador con Cuenta, Descripción, Saldo Inicial, Débitos, Créditos y Saldo Final.</p></div></div><form className="panel formPanel" onSubmit={importar}><div className="panelHead compact"><div><h2>Importar archivo</h2><p>Formato esperado: balance de comprobación en CSV, XLS o XLSX.</p></div></div><div className="formGrid"><label>Período<input type="month" value={periodo} onChange={event=>setPeriodo(event.target.value)} required/></label><label>Archivo<input type="file" accept=".csv,.xls,.xlsx" onChange={event=>setFile(event.target.files?.[0]??null)} required/></label><label className="wide">Campos detectados<input readOnly value="Cuenta, Descripción, Saldo Inicial, Débitos, Créditos, Saldo Final"/></label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Importando…":"Importar balanza"}</button></div></form><section className="panel tablePanel"><div className="panelHead"><div><h2>Historial de importaciones</h2><p>{importaciones.length} archivos procesados</p></div></div><div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>PERÍODO</th><th>LÍNEAS</th><th>TOTAL DÉBITOS</th><th>TOTAL CRÉDITOS</th><th>FECHA</th><th>ESTADO</th></tr></thead><tbody>{importaciones.map(item=><tr key={item.id}><td><b>{item.archivoNombre}</b><small>{Math.round(item.archivoTamano/1024)} KB</small></td><td>{item.periodo}</td><td>{item.totalLineas}</td><td>{dinero.format(Number(item.totalDebe))}</td><td>{dinero.format(Number(item.totalHaber))}</td><td>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</td><td><span className="status done">{item.estado}</span></td></tr>)}</tbody></table></div></section></>;
 }
 
 function Auditoria(){ const [eventos,setEventos]=useState<Evento[]>([]); useEffect(()=>{fetch("/api/auditoria").then(r=>r.json()).then(data=>setEventos(data.eventos??[]));},[]); return <><div className="pageHead"><div><span className="eyebrow">TRAZABILIDAD</span><h1>Auditoría general</h1><p>Vista exclusiva y de solo lectura para revisar actividad del sistema.</p></div></div><div className="readOnlyBanner">Modo auditor: ninguna acción puede modificar la información.</div><section className="panel tablePanel"><div className="panelHead"><div><h2>Bitácora de actividad</h2><p>Eventos registrados por el sistema</p></div></div><table><thead><tr><th>FECHA</th><th>USUARIO</th><th>ACCIÓN</th><th>RESULTADO</th></tr></thead><tbody>{eventos.map(item=><tr key={`${item.fecha}-${item.accion}`}><td>{item.fecha}</td><td>{item.usuario}</td><td>{item.accion}</td><td><span className="status done">{item.resultado}</span></td></tr>)}</tbody></table></section></> }
