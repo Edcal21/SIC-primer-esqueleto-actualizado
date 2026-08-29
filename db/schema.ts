@@ -91,3 +91,38 @@ export const cuentasContables = pgTable("cuentas_contables", {
   check("ck_cuentas_contables_estado", sql`${table.estado} in ('activa', 'inactiva')`),
   check("ck_cuentas_contables_flujo", sql`${table.clasificacionFlujo} in ('operación', 'inversión', 'financiamiento', 'no aplica')`),
 ]);
+
+export const importacionesBalanza = pgTable("importaciones_balanza", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  archivoNombre: text("archivo_nombre").notNull(),
+  archivoTamano: integer("archivo_tamano").notNull(),
+  periodo: varchar("periodo", { length: 7 }).notNull(),
+  estado: varchar("estado", { length: 12, enum: ["procesado", "error"] }).notNull().default("procesado"),
+  totalLineas: integer("total_lineas").notNull().default(0),
+  totalDebe: numeric("total_debe", { precision: 18, scale: 2 }).notNull().default("0"),
+  totalHaber: numeric("total_haber", { precision: 18, scale: 2 }).notNull().default("0"),
+  importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_importaciones_balanza_periodo").on(table.periodo),
+  index("idx_importaciones_balanza_usuario").on(table.importadoPor),
+  check("ck_importaciones_balanza_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("ck_importaciones_balanza_estado", sql`${table.estado} in ('procesado', 'error')`),
+  check("ck_importaciones_balanza_totales", sql`${table.totalLineas} >= 0 and ${table.totalDebe} >= 0 and ${table.totalHaber} >= 0`),
+]);
+
+export const lineasBalanza = pgTable("lineas_balanza", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  importacionId: uuid("importacion_id").notNull().references(() => importacionesBalanza.id, { onDelete: "cascade" }),
+  numeroLinea: integer("numero_linea").notNull(),
+  cuentaCodigo: varchar("cuenta_codigo", { length: 40 }).notNull(),
+  cuentaNombre: text("cuenta_nombre").notNull(),
+  debe: numeric("debe", { precision: 18, scale: 2 }).notNull().default("0"),
+  haber: numeric("haber", { precision: 18, scale: 2 }).notNull().default("0"),
+  saldo: numeric("saldo", { precision: 18, scale: 2 }).notNull().default("0"),
+}, (table) => [
+  index("idx_lineas_balanza_importacion").on(table.importacionId),
+  index("idx_lineas_balanza_cuenta").on(table.cuentaCodigo),
+  check("ck_lineas_balanza_numero", sql`${table.numeroLinea} > 0`),
+  check("ck_lineas_balanza_montos", sql`${table.debe} >= 0 and ${table.haber} >= 0`),
+]);

@@ -43,6 +43,13 @@
       "when": 1788031200000,
       "tag": "0005_restrict_contador_minutas",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788032400000,
+      "tag": "0006_importaciones_balanza",
+      "breakpoints": true
     }
   ]
 }
