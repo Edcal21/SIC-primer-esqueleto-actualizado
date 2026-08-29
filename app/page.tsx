@@ -6,6 +6,8 @@ type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "mov
 type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
 type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string };
 type Evento = { fecha: string; usuario: string; accion: string; resultado: string };
+type RolAdmin = { id: User["rol"]; nombre: string; descripcion: string; permisos: Permiso[] };
+type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: User["rol"]; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
@@ -49,7 +51,7 @@ export default function Home() {
 
   return <main className="shell">
     <aside className="sidebar"><div className="brand"><span className="brandMark">S</span><div><b>SIC</b><small>Sistema contable</small></div></div><nav aria-label="Navegación principal"><p className="navLabel">MÓDULOS AUTORIZADOS</p>{allowedMenu.map(item=><button key={item.nombre} className={active===item.nombre?"navItem active":"navItem"} onClick={()=>setActive(item.nombre)}><span>{item.icono}</span>{item.nombre}</button>)}</nav><div className="sidebarFoot"><span className="avatar">{user.nombre.split(" ").map(word=>word[0]).slice(0,2).join("")}</span><div><b>{user.nombre}</b><small>{nombresRol[user.rol]}</small></div><button aria-label="Cerrar sesión" onClick={logout}>↪</button></div></aside>
-    <section className="workspace"><header className="topbar"><div><p>Sistema de Información Contable</p><span>Sesión protegida · {nombresRol[user.rol]}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>＋ Nuevo movimiento</button> : null}</header><div className="content">{active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
+    <section className="workspace"><header className="topbar"><div><p>Sistema de Información Contable</p><span>Sesión protegida · {nombresRol[user.rol]}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>＋ Nuevo movimiento</button> : null}</header><div className="content">{active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
     {notice ? <div className="toast">✓ {notice}</div> : null}
   </main>;
 }
@@ -65,6 +67,63 @@ function Modulo({ nombre, user }: { nombre: string; user: User }) {
 }
 
 function Movimiento({ notify }: { notify: (message: string) => void }) { return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Esta vista solo existe para el Contador general.</p></div></div><section className="panel formPanel"><div className="formGrid"><label>Fecha<input type="date" defaultValue="2026-06-26"/></label><label>Tipo<select><option>Ingreso</option><option>Egreso</option></select></label><label className="wide">Cuenta<select><option>11010201 · BAC Credomatic</option><option>41010101 · Ofrendas recibidas</option></select></label><label>Referencia<input placeholder="Número de minuta"/></label><label>Monto C$<input type="number" min="0" step="0.01"/></label><label className="wide">Concepto<textarea/></label></div><div className="formActions"><button className="primary" onClick={()=>notify("Movimiento validado")}>Guardar movimiento</button></div></section></> }
+
+function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
+  const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
+  const [roles, setRoles] = useState<RolAdmin[]>([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function cargarDatos() {
+    setError("");
+    const [usuariosResponse, rolesResponse] = await Promise.all([fetch("/api/admin/usuarios"), fetch("/api/admin/roles")]);
+    const usuariosData = await usuariosResponse.json();
+    const rolesData = await rolesResponse.json();
+    if (!usuariosResponse.ok) return setError(usuariosData.error ?? "No se pudieron cargar los usuarios");
+    if (!rolesResponse.ok) return setError(rolesData.error ?? "No se pudieron cargar los roles");
+    setUsuarios(usuariosData.usuarios ?? []);
+    setRoles(rolesData.roles ?? []);
+  }
+
+  useEffect(() => { cargarDatos(); }, []);
+
+  async function crearUsuario(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError("");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch("/api/admin/usuarios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario: form.get("usuario"),
+        nombre: form.get("nombre"),
+        rolId: form.get("rolId"),
+        password: form.get("password"),
+      }),
+    });
+    const result = await response.json();
+    setSaving(false);
+    if (!response.ok) return setError(result.error);
+    event.currentTarget.reset();
+    await cargarDatos();
+    notify("Usuario creado");
+  }
+
+  async function actualizarUsuario(id: string, changes: Partial<Pick<UsuarioAdmin, "nombre" | "rolId" | "estado">>) {
+    setError("");
+    const response = await fetch(`/api/admin/usuarios/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    const result = await response.json();
+    if (!response.ok) return setError(result.error);
+    setUsuarios(current => current.map(item => item.id === id ? { ...item, ...result.usuario } : item));
+    notify("Usuario actualizado");
+  }
+
+  return <><div className="pageHead"><div><span className="eyebrow">ADMINISTRACIÓN</span><h1>Usuarios y roles</h1><p>Gestión inicial de accesos del sistema.</p></div></div><section className="adminLayout"><form className="panel formPanel" onSubmit={crearUsuario}><div className="panelHead compact"><div><h2>Crear usuario</h2><p>El usuario podrá iniciar sesión con el rol asignado.</p></div></div><div className="formGrid"><label>Usuario<input name="usuario" required placeholder="usuario.nuevo"/></label><label>Nombre<input name="nombre" required placeholder="Nombre completo"/></label><label>Rol<select name="rolId" required defaultValue=""><option value="" disabled>Seleccione rol</option>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></label><label>Contraseña inicial<input name="password" type="password" required minLength={8} placeholder="Mínimo 8 caracteres"/></label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear usuario"}</button></div></form><section className="panel rolesPanel"><div className="panelHead compact"><div><h2>Roles disponibles</h2><p>{roles.length} perfiles configurados</p></div></div>{roles.map(rol=><article key={rol.id} className="roleItem"><b>{rol.nombre}</b><span>{rol.descripcion}</span><small>{rol.permisos.length} permisos</small></article>)}</section></section><section className="panel tablePanel"><div className="panelHead"><div><h2>Usuarios registrados</h2><p>{usuarios.length} cuentas disponibles</p></div></div><div className="tableWrap"><table><thead><tr><th>USUARIO</th><th>NOMBRE</th><th>ROL</th><th>ESTADO</th><th>CREADO</th></tr></thead><tbody>{usuarios.map(item=><tr key={item.id}><td><b>{item.usuario}</b></td><td><input className="inlineInput" value={item.nombre} onChange={event=>setUsuarios(current=>current.map(user=>user.id===item.id?{...user,nombre:event.target.value}:user))} onBlur={event=>actualizarUsuario(item.id,{nombre:event.target.value})}/></td><td><select className="inlineInput" value={item.rolId} onChange={event=>actualizarUsuario(item.id,{rolId:event.target.value as User["rol"]})}>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></td><td><button className={item.estado==="activo"?"status done":"status pending"} onClick={()=>actualizarUsuario(item.id,{estado:item.estado==="activo"?"inactivo":"activo"})}>{item.estado}</button></td><td>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</td></tr>)}</tbody></table></div></section></>;
+}
 
 function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: string) => void }) {
   const [reportes, setReportes] = useState<Reporte[]>([]); const [file, setFile] = useState<File | null>(null); const [error,setError]=useState("");
