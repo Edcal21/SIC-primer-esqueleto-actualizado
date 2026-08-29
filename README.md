@@ -43,6 +43,7 @@ También se puede usar `npm install` y `npm run dev`, aunque pnpm es la opción 
 | Comando | Descripción |
 | --- | --- |
 | `pnpm dev` | Inicia Vinext y Wrangler en desarrollo. |
+| `pnpm dev:lan` | Inicia el servidor accesible desde la red local. |
 | `pnpm build` | Genera la compilación de producción en `dist/`. |
 | `pnpm start` | Ejecuta la compilación generada; requiere `pnpm build`. |
 | `pnpm lint` | Ejecuta ESLint. |
