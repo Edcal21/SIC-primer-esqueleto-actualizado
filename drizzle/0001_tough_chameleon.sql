@@ -1,0 +1,1 @@
+ALTER TABLE "cuentas_contables" ADD CONSTRAINT "fk_cuentas_contables_padre" FOREIGN KEY ("cuenta_padre") REFERENCES "public"."cuentas_contables"("codigo") ON DELETE no action ON UPDATE no action;

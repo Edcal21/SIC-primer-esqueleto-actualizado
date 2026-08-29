@@ -11,14 +11,14 @@ Guía técnica del prototipo web SIC. Implementa una interfaz contable demostrat
 | Interfaz | React 19, TypeScript y CSS | Pantallas, módulos y navegación basada en permisos. |
 | Aplicación | Vinext y Vite 8 | Renderizado y rutas tipo App Router. |
 | Runtime | Cloudflare Workers y Wrangler | Entorno local y destino de despliegue. |
-| Datos | Drizzle ORM y Cloudflare D1 (SQLite) | Esquema y acceso al catálogo contable. |
+| Datos | Drizzle ORM y PostgreSQL | Persistencia relacional del catálogo contable. |
 | Migraciones | Drizzle Kit | Generación de SQL desde TypeScript. |
 
 ## Requisitos
 
 - Node.js 22.13 o superior.
 - pnpm 9 o posterior (recomendado; el repositorio incluye `pnpm-lock.yaml`).
-- Cloudflare D1 solo para habilitar persistencia o desplegar.
+- PostgreSQL 14 o superior para habilitar persistencia.
 
 ```bash
 node --version
@@ -48,6 +48,9 @@ También se puede usar `npm install` y `npm run dev`, aunque pnpm es la opción 
 | `pnpm lint` | Ejecuta ESLint. |
 | `pnpm test` | Compila y ejecuta las pruebas Node.js. |
 | `pnpm db:generate` | Genera migraciones desde `db/schema.ts`. |
+| `pnpm db:migrate` | Aplica las migraciones pendientes a PostgreSQL. |
+| `pnpm db:push` | Sincroniza el esquema directamente durante desarrollo. |
+| `pnpm db:studio` | Abre Drizzle Studio para inspeccionar los datos. |
 
 ## Acceso de desarrollo
 
@@ -75,15 +78,19 @@ No use el secreto de respaldo de `lib/auth.ts` fuera del entorno local. HTTPS fo
 
 ## Base de datos y catálogo
 
-El esquema está en `db/schema.ts`; la migración inicial es `drizzle/0000_cuentas_contables.sql`. Define `cuentas_contables` con código de ocho caracteres, descripción, nivel, cuenta padre, indicador de movimiento, naturaleza, estado y clasificación de flujo.
+El esquema PostgreSQL está en `db/schema.ts` y las migraciones versionadas están en `drizzle/`. Define `cuentas_contables` con código de ocho caracteres, descripción, nivel, cuenta padre, indicador de movimiento, naturaleza, estado y clasificación de flujo.
 
-El código espera un binding Cloudflare D1 llamado `DB`. Para habilitarlo:
+En Windows, con PostgreSQL instalado, ejecute desde la raíz:
 
-1. Cree una base D1 en Cloudflare.
-2. Especifique `"DB"` en el campo `d1` de `.openai/hosting.json`.
-3. Aplique la migración inicial mediante el flujo de migraciones de Cloudflare.
+```powershell
+.\scripts\setup-postgres.ps1
+```
 
-Actualmente `.openai/hosting.json` mantiene `d1` y `r2` en `null`; por ello, la persistencia no está habilitada. El catálogo fuente de 761 filas tampoco forma parte del repositorio y debe validarse e importarse antes de usarlo por completo.
+El asistente solicita la contraseña sin mostrarla, crea la base `sic` si no existe, guarda `DATABASE_URL` en `.dev.vars` y aplica las migraciones. `.dev.vars` está ignorado por Git y nunca debe confirmarse en el repositorio. Como alternativa, copie `.dev.vars.example` a `.dev.vars`, complete la URL y ejecute `pnpm db:migrate`.
+
+Compruebe la conexión con la aplicación en ejecución visitando `http://localhost:3000/api/health/database`. Una conexión correcta devuelve `{ "database": "connected" }`.
+
+El catálogo fuente de 761 filas no forma parte del repositorio y debe validarse e importarse antes de usarlo por completo. Las demás pantallas todavía usan datos demostrativos hasta que sus tablas y operaciones se implementen.
 
 ## Estructura
 
@@ -93,7 +100,7 @@ app/                 Interfaz principal y rutas API
   api/banco/         Consulta y carga de reportes bancarios
   api/reportes/      Generación y descarga de reportes
   api/auditoria/     Consulta de eventos de auditoría
-db/                  Esquema Drizzle y acceso a D1
+db/                  Esquema Drizzle y acceso a PostgreSQL
 drizzle/             Migraciones SQL
 lib/                 Autenticación y lógica de reportes
 worker/              Entrada de Cloudflare Worker
@@ -126,7 +133,7 @@ pnpm build
 
 `pnpm test` está disponible, pero las pruebas actuales parecen heredadas de una plantilla de vista previa y no reflejan completamente la interfaz SIC; deben actualizarse antes de utilizarlas como criterio de aceptación.
 
-Pendiente para producción: persistencia de usuarios, movimientos y auditoría; D1 configurado y migrado; importadores validados; reglas de conciliación; autorización de servidor en operaciones sensibles; pruebas alineadas; secretos, HTTPS, monitoreo y respaldos.
+Pendiente para producción: persistencia de usuarios, movimientos y auditoría; PostgreSQL administrado y migrado; importadores validados; reglas de conciliación; autorización de servidor en operaciones sensibles; pruebas alineadas; secretos, HTTPS, monitoreo y respaldos.
 
 ## Soporte
 

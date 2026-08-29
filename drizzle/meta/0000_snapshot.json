@@ -1,0 +1,156 @@
+{
+  "id": "70ee79d0-8b4a-4494-a058-06496563c2e3",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.cuentas_contables": {
+      "name": "cuentas_contables",
+      "schema": "",
+      "columns": {
+        "codigo": {
+          "name": "codigo",
+          "type": "varchar(8)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nivel": {
+          "name": "nivel",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cuenta_padre": {
+          "name": "cuenta_padre",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "es_cuenta_movimiento": {
+          "name": "es_cuenta_movimiento",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "naturaleza": {
+          "name": "naturaleza",
+          "type": "varchar(9)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estado": {
+          "name": "estado",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'activa'"
+        },
+        "clasificacion_flujo": {
+          "name": "clasificacion_flujo",
+          "type": "varchar(14)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'no aplica'"
+        }
+      },
+      "indexes": {
+        "ux_cuentas_contables_codigo": {
+          "name": "ux_cuentas_contables_codigo",
+          "columns": [
+            {
+              "expression": "codigo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_cuentas_contables_padre": {
+          "name": "idx_cuentas_contables_padre",
+          "columns": [
+            {
+              "expression": "cuenta_padre",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_cuentas_contables_movimiento_estado": {
+          "name": "idx_cuentas_contables_movimiento_estado",
+          "columns": [
+            {
+              "expression": "es_cuenta_movimiento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ck_cuentas_contables_codigo_8": {
+          "name": "ck_cuentas_contables_codigo_8",
+          "value": "length(\"cuentas_contables\".\"codigo\") = 8"
+        },
+        "ck_cuentas_contables_nivel": {
+          "name": "ck_cuentas_contables_nivel",
+          "value": "\"cuentas_contables\".\"nivel\" between 1 and 5"
+        },
+        "ck_cuentas_contables_naturaleza": {
+          "name": "ck_cuentas_contables_naturaleza",
+          "value": "\"cuentas_contables\".\"naturaleza\" in ('deudora', 'acreedora')"
+        },
+        "ck_cuentas_contables_estado": {
+          "name": "ck_cuentas_contables_estado",
+          "value": "\"cuentas_contables\".\"estado\" in ('activa', 'inactiva')"
+        },
+        "ck_cuentas_contables_flujo": {
+          "name": "ck_cuentas_contables_flujo",
+          "value": "\"cuentas_contables\".\"clasificacion_flujo\" in ('operación', 'inversión', 'financiamiento', 'no aplica')"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

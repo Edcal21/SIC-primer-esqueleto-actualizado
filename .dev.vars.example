@@ -1,0 +1,3 @@
+# Copie este archivo como .dev.vars y reemplace la contraseña.
+# Si contiene caracteres especiales, codifíquelos para URL (por ejemplo, @ = %40).
+DATABASE_URL="postgresql://postgres:SU_CONTRASENA@localhost:5432/sic"
