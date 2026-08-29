@@ -140,6 +140,8 @@ export async function POST(request: Request) {
 
   const totalDebe = filas.reduce((total, fila) => total + Number(fila.debe), 0);
   const totalHaber = filas.reduce((total, fila) => total + Number(fila.haber), 0);
+  const diferencia = totalDebe - totalHaber;
+  const estado = Math.abs(diferencia) < 0.01 ? "procesado" : "con_diferencias";
   const db = getDb();
 
   try {
@@ -148,6 +150,7 @@ export async function POST(request: Request) {
         archivoNombre: archivo.name,
         archivoTamano: archivo.size,
         periodo,
+        estado,
         totalLineas: filas.length,
         totalDebe: totalDebe.toFixed(2),
         totalHaber: totalHaber.toFixed(2),
@@ -163,7 +166,7 @@ export async function POST(request: Request) {
         accion: "Importó balanza de comprobación",
         entidad: "importaciones_balanza",
         entidadId: importacion.id,
-        detalle: `${archivo.name} · ${periodo} · ${filas.length} líneas`,
+        detalle: `${archivo.name} · ${periodo} · ${filas.length} líneas · diferencia ${diferencia.toFixed(2)}`,
       });
 
       return { importacion, lineas };

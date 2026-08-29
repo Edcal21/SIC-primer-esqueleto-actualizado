@@ -57,6 +57,13 @@
       "when": 1788033600000,
       "tag": "0007_auditoria_eventos",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788034800000,
+      "tag": "0008_importacion_con_diferencias",
+      "breakpoints": true
     }
   ]
 }

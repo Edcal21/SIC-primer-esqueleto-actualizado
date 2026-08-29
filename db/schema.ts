@@ -97,7 +97,7 @@ export const importacionesBalanza = pgTable("importaciones_balanza", {
   archivoNombre: text("archivo_nombre").notNull(),
   archivoTamano: integer("archivo_tamano").notNull(),
   periodo: varchar("periodo", { length: 7 }).notNull(),
-  estado: varchar("estado", { length: 12, enum: ["procesado", "error"] }).notNull().default("procesado"),
+  estado: varchar("estado", { length: 16, enum: ["procesado", "con_diferencias", "error"] }).notNull().default("procesado"),
   totalLineas: integer("total_lineas").notNull().default(0),
   totalDebe: numeric("total_debe", { precision: 18, scale: 2 }).notNull().default("0"),
   totalHaber: numeric("total_haber", { precision: 18, scale: 2 }).notNull().default("0"),
@@ -107,7 +107,7 @@ export const importacionesBalanza = pgTable("importaciones_balanza", {
   index("idx_importaciones_balanza_periodo").on(table.periodo),
   index("idx_importaciones_balanza_usuario").on(table.importadoPor),
   check("ck_importaciones_balanza_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
-  check("ck_importaciones_balanza_estado", sql`${table.estado} in ('procesado', 'error')`),
+  check("ck_importaciones_balanza_estado", sql`${table.estado} in ('procesado', 'con_diferencias', 'error')`),
   check("ck_importaciones_balanza_totales", sql`${table.totalLineas} >= 0 and ${table.totalDebe} >= 0 and ${table.totalHaber} >= 0`),
 ]);
 
