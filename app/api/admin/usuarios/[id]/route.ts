@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../../db";
 import { roles, usuarios } from "../../../../../db/schema";
+import { registrarAuditoria } from "../../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../../lib/auth";
 
 type UsuarioUpdatePayload = {
@@ -59,5 +60,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   });
 
   if (!updated) return jsonError("Usuario no encontrado", 404);
+  await registrarAuditoria(db, { user: auth.user, modulo: "Usuarios", accion: "Actualizó usuario", entidad: "usuarios", entidadId: updated.id, detalle: Object.keys(values).join(", ") });
   return Response.json({ usuario: updated }, { headers: { "Cache-Control": "no-store" } });
 }

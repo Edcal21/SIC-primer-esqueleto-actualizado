@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, pbkdf2Sync } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { roles, usuarios } from "../../../../db/schema";
+import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
 
 type UsuarioPayload = {
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
       creadoEn: usuarios.creadoEn,
     });
 
+    await registrarAuditoria(db, { user: auth.user, modulo: "Usuarios", accion: "Creó usuario", entidad: "usuarios", entidadId: created.id, detalle: `${created.usuario} · ${created.rolId}` });
     return Response.json({ usuario: created }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("User creation failed", error);

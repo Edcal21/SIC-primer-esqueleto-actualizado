@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../../db";
 import { permisos, roles, rolesPermisos } from "../../../../../db/schema";
+import { registrarAuditoria } from "../../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../../lib/auth";
 
 type RolUpdatePayload = {
@@ -57,5 +58,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const rolePermissions = await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, id));
+  await registrarAuditoria(db, { user, modulo: "Roles", accion: "Actualizó rol", entidad: "roles", entidadId: id, detalle: permissionIds ? `${permissionIds.length} permisos` : Object.keys(values).join(", ") });
   return Response.json({ rol: { ...updated, permisos: rolePermissions.map(item => item.permisoId) } }, { headers: { "Cache-Control": "no-store" } });
 }

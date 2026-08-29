@@ -50,6 +50,13 @@
       "when": 1788032400000,
       "tag": "0006_importaciones_balanza",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788033600000,
+      "tag": "0007_auditoria_eventos",
+      "breakpoints": true
     }
   ]
 }

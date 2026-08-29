@@ -1,6 +1,7 @@
 import { asc, desc, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { detallesMovimientos, movimientosCuentas } from "../../../db/schema";
+import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 
 type DetallePayload = {
@@ -86,6 +87,14 @@ export async function POST(request: Request) {
           orden: detalle.orden,
         })),
       ).returning();
+      await registrarAuditoria(tx, {
+        user,
+        modulo: "Minutas",
+        accion: "Registró movimiento contable",
+        entidad: "movimientos_cuentas",
+        entidadId: movimiento.id,
+        detalle: `${fecha} · ${concepto}`,
+      });
 
       return { movimiento, detalles: detallesCreados };
     });

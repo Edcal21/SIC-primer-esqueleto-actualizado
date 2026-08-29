@@ -1,6 +1,7 @@
 import { asc } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { permisos, roles, rolesPermisos } from "../../../../db/schema";
+import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 
 type RolPayload = {
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
     if (permissionIds.length) {
       await db.insert(rolesPermisos).values(permissionIds.map(permisoId => ({ rolId: id, permisoId })));
     }
+    await registrarAuditoria(db, { user, modulo: "Roles", accion: "Creó rol", entidad: "roles", entidadId: created.id, detalle: `${permissionIds.length} permisos` });
     return Response.json({ rol: { ...created, permisos: permissionIds } }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Role creation failed", error);

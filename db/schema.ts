@@ -126,3 +126,21 @@ export const lineasBalanza = pgTable("lineas_balanza", {
   check("ck_lineas_balanza_numero", sql`${table.numeroLinea} > 0`),
   check("ck_lineas_balanza_montos", sql`${table.debe} >= 0 and ${table.haber} >= 0`),
 ]);
+
+export const auditoriaEventos = pgTable("auditoria_eventos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  usuarioId: varchar("usuario_id", { length: 40 }).references(() => usuarios.id),
+  usuarioNombre: text("usuario_nombre").notNull(),
+  modulo: varchar("modulo", { length: 40 }).notNull(),
+  accion: varchar("accion", { length: 80 }).notNull(),
+  entidad: varchar("entidad", { length: 80 }),
+  entidadId: text("entidad_id"),
+  resultado: varchar("resultado", { length: 12, enum: ["correcto", "error"] }).notNull(),
+  detalle: text("detalle"),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_auditoria_eventos_fecha").on(table.creadoEn),
+  index("idx_auditoria_eventos_usuario").on(table.usuarioId),
+  index("idx_auditoria_eventos_modulo").on(table.modulo),
+  check("ck_auditoria_eventos_resultado", sql`${table.resultado} in ('correcto', 'error')`),
+]);

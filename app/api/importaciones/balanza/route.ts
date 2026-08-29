@@ -2,6 +2,7 @@ import { desc } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { getDb } from "../../../../db";
 import { importacionesBalanza, lineasBalanza } from "../../../../db/schema";
+import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 
 type RawRow = Record<string, unknown>;
@@ -156,6 +157,14 @@ export async function POST(request: Request) {
       const lineas = await tx.insert(lineasBalanza).values(
         filas.map(fila => ({ ...fila, importacionId: importacion.id })),
       ).returning();
+      await registrarAuditoria(tx, {
+        user,
+        modulo: "Importaciones",
+        accion: "Importó balanza de comprobación",
+        entidad: "importaciones_balanza",
+        entidadId: importacion.id,
+        detalle: `${archivo.name} · ${periodo} · ${filas.length} líneas`,
+      });
 
       return { importacion, lineas };
     });
