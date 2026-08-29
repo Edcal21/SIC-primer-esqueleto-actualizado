@@ -63,7 +63,7 @@ Los usuarios locales están definidos en `lib/auth.ts`:
 | `banco` | `Banco2026!` | Operador bancario | Consulta y carga de archivos bancarios. |
 | `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |
 
-Estas credenciales son exclusivamente de desarrollo. En producción, los usuarios y sus contraseñas deben almacenarse de forma persistente y gestionarse mediante un proceso seguro.
+Estas credenciales son exclusivamente de desarrollo. La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y `usuarios`, y carga estos tres usuarios iniciales con sus hashes existentes. Si PostgreSQL no está disponible durante desarrollo local, la aplicación mantiene un fallback temporal con los mismos usuarios para no bloquear la maqueta.
 
 ## Sesiones y seguridad
 

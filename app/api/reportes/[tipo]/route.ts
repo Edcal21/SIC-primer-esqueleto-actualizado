@@ -2,7 +2,7 @@ import { esTipoReporte, generarReportePorPeriodo, reporteCsv, type Granularidad 
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 
 export async function GET(request:Request,{params}:{params:Promise<{tipo:string}>}){
-  const user=usuarioDesdeRequest(request);if(!user)return jsonError("No autenticado",401);if(!puede(user,"reportes:ver"))return jsonError("Permiso insuficiente",403);
+  const user=await usuarioDesdeRequest(request);if(!user)return jsonError("No autenticado",401);if(!puede(user,"reportes:ver"))return jsonError("Permiso insuficiente",403);
   const {tipo}=await params;if(!esTipoReporte(tipo))return jsonError("Reporte no encontrado",404);
   const url=new URL(request.url),granularidad=(url.searchParams.get("granularidad")??"anio") as Granularidad,periodo=url.searchParams.get("periodo")??url.searchParams.get("anio")??"2026",comparar=url.searchParams.get("comparar")??"2025",formato=url.searchParams.get("formato")??"json";
   if(!["dia","mes","trimestre","anio"].includes(granularidad))return jsonError("Granularidad inválida",400);

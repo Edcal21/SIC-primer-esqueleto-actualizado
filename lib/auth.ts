@@ -1,4 +1,7 @@
 import { createHmac, pbkdf2Sync, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { getDb } from "../db";
+import { rolesPermisos, usuarios as usuariosTable } from "../db/schema";
 
 export type RolId = "contador_general" | "operador_bancario" | "auditor_general";
 export type Permiso = "panel:ver" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
@@ -12,7 +15,7 @@ const permisosPorRol: Record<RolId, Permiso[]> = {
   auditor_general: ["panel:ver", "banco:ver", "reportes:ver", "reportes:descargar", "auditoria:ver"],
 };
 
-const usuarios: UsuarioInterno[] = [
+const usuariosLocales: UsuarioInterno[] = [
   { id: "usr-contador", usuario: "contador", nombre: "Contador General", rol: "contador_general", permisos: permisosPorRol.contador_general, salt: "b04259fa5a05cd95fda1a4af06b926d8", passwordHash: "a84233f4147da5048daef1e3d0d875df1d9ad96a9b77b35c399001793f9b5253" },
   { id: "usr-banco", usuario: "banco", nombre: "Operador Bancario", rol: "operador_bancario", permisos: permisosPorRol.operador_bancario, salt: "cd15b6c7a108464a98ed72733da083aa", passwordHash: "07ec8bed948731f1ccb8d4f5e49ac38ed62eab2f213cbb120950d2f9233525cc" },
   { id: "usr-auditor", usuario: "auditor", nombre: "Auditor General", rol: "auditor_general", permisos: permisosPorRol.auditor_general, salt: "1ae524d779667e6470265d096ab2efec", passwordHash: "563dff2b46b224cec7a76817f514431c2167f0a7c05ca16db989ba01013670ba" },
@@ -23,8 +26,68 @@ const SESSION_SECONDS = 60 * 60 * 8;
 const secret = () => process.env.SIC_SESSION_SECRET ?? "sic-local-development-secret-change-in-production";
 const sign = (value: string) => createHmac("sha256", secret()).update(value).digest("base64url");
 
-export function autenticar(usuario: string, password: string): UsuarioSesion | null {
-  const found = usuarios.find(item => item.usuario === usuario.trim().toLowerCase());
+async function usuarioDesdeDbPorUsuario(usuario: string): Promise<UsuarioInterno | null> {
+  const db = getDb();
+  const [found] = await db.select().from(usuariosTable).where(eq(usuariosTable.usuario, usuario.trim().toLowerCase())).limit(1);
+  if (!found || found.estado !== "activo") return null;
+  const permisos = await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, found.rolId));
+  return {
+    id: found.id,
+    usuario: found.usuario,
+    nombre: found.nombre,
+    rol: found.rolId as RolId,
+    permisos: permisos.map(item => item.permisoId as Permiso),
+    salt: found.salt,
+    passwordHash: found.passwordHash,
+  };
+}
+
+async function usuarioDesdeDbPorId(id: string): Promise<UsuarioSesion | null> {
+  const db = getDb();
+  const [found] = await db.select().from(usuariosTable).where(eq(usuariosTable.id, id)).limit(1);
+  if (!found || found.estado !== "activo") return null;
+  const permisos = await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, found.rolId));
+  return {
+    id: found.id,
+    usuario: found.usuario,
+    nombre: found.nombre,
+    rol: found.rolId as RolId,
+    permisos: permisos.map(item => item.permisoId as Permiso),
+  };
+}
+
+function usuarioLocalPorUsuario(usuario: string): UsuarioInterno | null {
+  return usuariosLocales.find(item => item.usuario === usuario.trim().toLowerCase()) ?? null;
+}
+
+function usuarioLocalPorId(id: string): UsuarioSesion | null {
+  const found = usuariosLocales.find(item => item.id === id);
+  if (!found) return null;
+  const { salt: _salt, passwordHash: _passwordHash, ...safeUser } = found;
+  void _salt; void _passwordHash;
+  return safeUser;
+}
+
+async function resolverUsuarioPorUsuario(usuario: string): Promise<UsuarioInterno | null> {
+  try {
+    return await usuarioDesdeDbPorUsuario(usuario);
+  } catch (error) {
+    console.warn("Falling back to local development users", error);
+    return usuarioLocalPorUsuario(usuario);
+  }
+}
+
+async function resolverUsuarioPorId(id: string): Promise<UsuarioSesion | null> {
+  try {
+    return await usuarioDesdeDbPorId(id);
+  } catch (error) {
+    console.warn("Falling back to local development session users", error);
+    return usuarioLocalPorId(id);
+  }
+}
+
+export async function autenticar(usuario: string, password: string): Promise<UsuarioSesion | null> {
+  const found = await resolverUsuarioPorUsuario(usuario);
   if (!found) return null;
   const calculated = pbkdf2Sync(password, found.salt, 210000, 32, "sha256");
   const expected = Buffer.from(found.passwordHash, "hex");
@@ -41,7 +104,7 @@ export function crearCookieSesion(user: UsuarioSesion): string {
 
 export function eliminarCookieSesion(): string { return `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`; }
 
-export function usuarioDesdeRequest(request: Request): UsuarioSesion | null {
+export async function usuarioDesdeRequest(request: Request): Promise<UsuarioSesion | null> {
   const raw = request.headers.get("cookie")?.split(";").map(item => item.trim()).find(item => item.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
   if (!raw) return null;
   const [payload, signature] = raw.split(".");
@@ -51,11 +114,7 @@ export function usuarioDesdeRequest(request: Request): UsuarioSesion | null {
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString()) as { sub: string; exp: number };
     if (data.exp < Math.floor(Date.now() / 1000)) return null;
-    const found = usuarios.find(item => item.id === data.sub);
-    if (!found) return null;
-    const { salt: _salt, passwordHash: _passwordHash, ...safeUser } = found;
-    void _salt; void _passwordHash;
-    return safeUser;
+    return await resolverUsuarioPorId(data.sub);
   } catch { return null; }
 }
 

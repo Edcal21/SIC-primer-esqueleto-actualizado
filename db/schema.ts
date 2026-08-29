@@ -1,5 +1,39 @@
-import { boolean, check, foreignKey, index, integer, pgTable, text, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+export const roles = pgTable("roles", {
+  id: varchar("id", { length: 40 }).primaryKey().notNull(),
+  nombre: text("nombre").notNull(),
+  descripcion: text("descripcion").notNull(),
+});
+
+export const permisos = pgTable("permisos", {
+  id: varchar("id", { length: 80 }).primaryKey().notNull(),
+  descripcion: text("descripcion").notNull(),
+});
+
+export const rolesPermisos = pgTable("roles_permisos", {
+  rolId: varchar("rol_id", { length: 40 }).notNull().references(() => roles.id),
+  permisoId: varchar("permiso_id", { length: 80 }).notNull().references(() => permisos.id),
+}, (table) => [
+  primaryKey({ columns: [table.rolId, table.permisoId], name: "pk_roles_permisos" }),
+  index("idx_roles_permisos_permiso").on(table.permisoId),
+]);
+
+export const usuarios = pgTable("usuarios", {
+  id: varchar("id", { length: 40 }).primaryKey().notNull(),
+  usuario: varchar("usuario", { length: 80 }).notNull(),
+  nombre: text("nombre").notNull(),
+  rolId: varchar("rol_id", { length: 40 }).notNull().references(() => roles.id),
+  salt: varchar("salt", { length: 32 }).notNull(),
+  passwordHash: varchar("password_hash", { length: 64 }).notNull(),
+  estado: varchar("estado", { length: 8, enum: ["activo", "inactivo"] }).notNull().default("activo"),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("ux_usuarios_usuario").on(table.usuario),
+  index("idx_usuarios_rol_estado").on(table.rolId, table.estado),
+  check("ck_usuarios_estado", sql`${table.estado} in ('activo', 'inactivo')`),
+]);
 
 export const cuentasContables = pgTable("cuentas_contables", {
   codigo: varchar("codigo", { length: 8 }).primaryKey().notNull(),
