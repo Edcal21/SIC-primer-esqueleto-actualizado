@@ -27,6 +27,7 @@ const COOKIE = "sic_session";
 const SESSION_SECONDS = 60 * 60 * 8;
 const secret = () => process.env.SIC_SESSION_SECRET ?? "sic-local-development-secret-change-in-production";
 const sign = (value: string) => createHmac("sha256", secret()).update(value).digest("base64url");
+const allowLocalFallback = () => process.env.SIC_ALLOW_LOCAL_AUTH_FALLBACK === "true";
 
 async function usuarioDesdeDbPorUsuario(usuario: string): Promise<UsuarioInterno | null> {
   const db = getDb();
@@ -74,7 +75,8 @@ async function resolverUsuarioPorUsuario(usuario: string): Promise<UsuarioIntern
   try {
     return await usuarioDesdeDbPorUsuario(usuario);
   } catch (error) {
-    console.warn("Falling back to local development users", error);
+    if (!allowLocalFallback()) throw error;
+    console.warn("Using local development users because SIC_ALLOW_LOCAL_AUTH_FALLBACK=true", error);
     return usuarioLocalPorUsuario(usuario);
   }
 }
@@ -83,7 +85,8 @@ async function resolverUsuarioPorId(id: string): Promise<UsuarioSesion | null> {
   try {
     return await usuarioDesdeDbPorId(id);
   } catch (error) {
-    console.warn("Falling back to local development session users", error);
+    if (!allowLocalFallback()) throw error;
+    console.warn("Using local development session users because SIC_ALLOW_LOCAL_AUTH_FALLBACK=true", error);
     return usuarioLocalPorId(id);
   }
 }

@@ -53,7 +53,7 @@ export async function POST(request: Request) {
   if (!fecha || !fechaRegex.test(fecha)) return jsonError("Fecha inválida", 400);
   if (!iglesiaCodigo) return jsonError("La iglesia es obligatoria", 400);
   if (!concepto) return jsonError("Concepto es obligatorio", 400);
-  if (!detalles.length) return jsonError("Debe agregar al menos un detalle", 400);
+  if (detalles.length < 2) return jsonError("Debe agregar al menos dos detalles para cumplir partida doble", 400);
 
   const detallesNormalizados = detalles.map((detalle, index) => ({
     tipo: detalle.tipo?.trim().toLowerCase(),
@@ -69,6 +69,9 @@ export async function POST(request: Request) {
     const monto = Number(detalle.monto);
     if (!Number.isFinite(monto) || monto <= 0) return jsonError("El monto debe ser mayor que cero", 400);
   }
+  const totalDebitos = detallesNormalizados.filter(detalle => detalle.tipo === "debito").reduce((total, detalle) => total + Number(detalle.monto), 0);
+  const totalCreditos = detallesNormalizados.filter(detalle => detalle.tipo === "credito").reduce((total, detalle) => total + Number(detalle.monto), 0);
+  if (Math.abs(totalDebitos - totalCreditos) >= 0.01) return jsonError("La minuta no está cuadrada: el total de débitos debe ser igual al total de créditos", 400);
 
   const db = getDb();
   try {

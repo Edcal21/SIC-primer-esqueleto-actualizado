@@ -1,8 +1,8 @@
 # SIC — Sistema de Información Contable
 
-Guía técnica del prototipo web SIC. Implementa una interfaz contable demostrativa con inicio de sesión por roles, reportes, archivos bancarios y auditoría.
+Guía técnica del sistema web SIC. Implementa una interfaz contable con inicio de sesión por roles, catálogo contable, importación de balanza, reportes, archivos bancarios y auditoría.
 
-> Estado: prototipo funcional con datos demostrativos. No debe usarse con información financiera real ni en producción.
+> Estado: sistema funcional conectado a PostgreSQL. Antes de usar información financiera real, configure secretos, respaldos y controles operativos del entorno.
 
 ## Arquitectura
 
@@ -64,7 +64,7 @@ Los usuarios locales están definidos en `lib/auth.ts`:
 | `banco` | `Banco2026!` | Operador bancario | Consulta y carga de archivos bancarios. |
 | `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |
 
-Estas credenciales son exclusivamente de desarrollo. La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y `usuarios`, y carga estos tres usuarios iniciales con sus hashes existentes. Si PostgreSQL no está disponible durante desarrollo local, la aplicación mantiene un fallback temporal con los mismos usuarios para no bloquear la maqueta.
+Estas credenciales son exclusivamente de desarrollo. La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y `usuarios`, y carga usuarios iniciales con hashes existentes. La aplicación exige PostgreSQL para autenticar; el fallback local de `lib/auth.ts` solo se activa si define `SIC_ALLOW_LOCAL_AUTH_FALLBACK=true`.
 
 ## Sesiones y seguridad
 
@@ -76,7 +76,7 @@ Estas credenciales son exclusivamente de desarrollo. La migración `0002_securit
 SIC_SESSION_SECRET="un-secreto-largo-y-aleatorio"
 ```
 
-No use el secreto de respaldo de `lib/auth.ts` fuera del entorno local. HTTPS forzado, rotación de sesiones, gestión persistente de usuarios y auditoría persistente siguen pendientes.
+No use el secreto de respaldo de `lib/auth.ts` fuera del entorno local. Para producción quedan pendientes HTTPS forzado, rotación de sesiones, monitoreo, respaldos y gestión segura de secretos.
 
 ## Base de datos y catálogo
 
@@ -92,7 +92,7 @@ El asistente solicita la contraseña sin mostrarla, crea la base `sic` si no exi
 
 Compruebe la conexión con la aplicación en ejecución visitando `http://localhost:3000/api/health/database`. Una conexión correcta devuelve `{ "database": "connected" }`.
 
-El catálogo fuente de 761 filas no forma parte del repositorio y debe validarse e importarse antes de usarlo por completo. Las demás pantallas todavía usan datos demostrativos hasta que sus tablas y operaciones se implementen.
+El catálogo puede administrarse desde la pantalla “Catálogo contable”. Además, cada balanza importada crea o actualiza cuentas activas en `cuentas_contables` cuando detecta códigos válidos de 8 dígitos. Los reportes financieros se generan desde las balanzas importadas; si no existe información para el período solicitado, el sistema muestra un mensaje de falta de datos en vez de usar cifras de relleno.
 
 ## Estructura
 
@@ -102,6 +102,7 @@ app/                 Interfaz principal y rutas API
   api/movimientos/   Registro y consulta de movimientos contables
   api/iglesias/      Catálogo de iglesias disponible para movimientos
   api/banco/         Consulta y carga de reportes bancarios
+  api/catalogo/      Administración de cuentas contables
   api/reportes/      Generación y descarga de reportes
   api/auditoria/     Consulta de eventos de auditoría
 db/                  Esquema Drizzle y acceso a PostgreSQL
@@ -122,11 +123,13 @@ tests/               Pruebas automatizadas
 | `/api/movimientos` | `GET`, `POST` | Consulta o registra encabezados y detalles de movimientos. |
 | `/api/iglesias` | `GET` | Lista las iglesias activas y sus códigos. |
 | `/api/banco/reportes` | `GET`, `POST` | Consulta o recibe archivos bancarios. |
+| `/api/catalogo/cuentas` | `GET`, `POST` | Consulta y crea cuentas contables. |
+| `/api/catalogo/cuentas/:codigo` | `PATCH` | Actualiza cuenta contable, estado o uso en movimientos. |
 | `/api/reportes` | `GET` | Consulta reportes disponibles. |
 | `/api/reportes/:tipo` | `GET` | Genera un reporte y permite salida CSV. |
 | `/api/auditoria` | `GET` | Consulta eventos de auditoría. |
 
-Las rutas se orientan a demostración. Revise sus manejadores antes de conectar datos institucionales o publicar la aplicación.
+Las rutas aplican permisos de servidor según el rol autenticado. Revise configuración de entorno, secretos y política de despliegue antes de publicar la aplicación.
 
 ## Validación y limitaciones
 
@@ -139,7 +142,7 @@ pnpm build
 
 `pnpm test` está disponible, pero las pruebas actuales parecen heredadas de una plantilla de vista previa y no reflejan completamente la interfaz SIC; deben actualizarse antes de utilizarlas como criterio de aceptación.
 
-Pendiente para producción: persistencia de usuarios, movimientos y auditoría; PostgreSQL administrado y migrado; importadores validados; reglas de conciliación; autorización de servidor en operaciones sensibles; pruebas alineadas; secretos, HTTPS, monitoreo y respaldos.
+Pendiente para producción: conciliación bancaria real, pruebas alineadas al flujo SIC, PostgreSQL administrado, secretos, HTTPS, monitoreo y respaldos.
 
 ## Soporte
 

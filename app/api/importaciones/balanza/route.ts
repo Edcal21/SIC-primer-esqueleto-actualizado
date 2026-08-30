@@ -1,7 +1,7 @@
 import { desc } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import { getDb } from "../../../../db";
-import { importacionesBalanza, lineasBalanza } from "../../../../db/schema";
+import { cuentasContables, importacionesBalanza, lineasBalanza } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 
@@ -38,6 +38,12 @@ function valorMonto(value: unknown) {
   const normalized = raw.replace(/[C$\s]/gi, "").replace(/,/g, "");
   const parsed = Number(normalized || "0");
   return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function inferirCuenta(codigo: string) {
+  const naturaleza = codigo.startsWith("2") || codigo.startsWith("3") || codigo.startsWith("4") ? "acreedora" : "deudora";
+  const clasificacionFlujo = codigo.startsWith("1") || codigo.startsWith("4") || codigo.startsWith("5") ? "operación" : "no aplica";
+  return { naturaleza: naturaleza as "deudora" | "acreedora", clasificacionFlujo: clasificacionFlujo as "operación" | "no aplica" };
 }
 
 function buscarValor(row: RawRow, aliases: string[]) {
@@ -160,6 +166,27 @@ export async function POST(request: Request) {
       const lineas = await tx.insert(lineasBalanza).values(
         filas.map(fila => ({ ...fila, importacionId: importacion.id })),
       ).returning();
+      for (const fila of filas) {
+        if (!/^\d{8}$/.test(fila.cuentaCodigo)) continue;
+        const cuenta = inferirCuenta(fila.cuentaCodigo);
+        await tx.insert(cuentasContables).values({
+          codigo: fila.cuentaCodigo,
+          descripcion: fila.cuentaNombre,
+          nivel: 5,
+          esCuentaMovimiento: true,
+          naturaleza: cuenta.naturaleza,
+          clasificacionFlujo: cuenta.clasificacionFlujo,
+        }).onConflictDoUpdate({
+          target: cuentasContables.codigo,
+          set: {
+            descripcion: fila.cuentaNombre,
+            esCuentaMovimiento: true,
+            estado: "activa",
+            naturaleza: cuenta.naturaleza,
+            clasificacionFlujo: cuenta.clasificacionFlujo,
+          },
+        });
+      }
       await registrarAuditoria(tx, {
         user,
         modulo: "Importaciones",
