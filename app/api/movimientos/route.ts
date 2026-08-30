@@ -1,6 +1,6 @@
-import { asc, desc, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { detallesMovimientos, movimientosCuentas } from "../../../db/schema";
+import { detallesMovimientos, iglesias, movimientosCuentas } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 
@@ -13,6 +13,7 @@ type DetallePayload = {
 
 type MovimientoPayload = {
   fecha?: string;
+  iglesiaCodigo?: string;
   referencia?: string;
   concepto?: string;
   detalles?: DetallePayload[];
@@ -44,11 +45,13 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return jsonError("Solicitud inválida", 400); }
 
   const fecha = body.fecha?.trim();
+  const iglesiaCodigo = body.iglesiaCodigo?.trim();
   const referencia = body.referencia?.trim() || null;
   const concepto = body.concepto?.trim();
   const detalles = body.detalles ?? [];
 
   if (!fecha || !fechaRegex.test(fecha)) return jsonError("Fecha inválida", 400);
+  if (!iglesiaCodigo) return jsonError("La iglesia es obligatoria", 400);
   if (!concepto) return jsonError("Concepto es obligatorio", 400);
   if (!detalles.length) return jsonError("Debe agregar al menos un detalle", 400);
 
@@ -69,9 +72,14 @@ export async function POST(request: Request) {
 
   const db = getDb();
   try {
+    const [iglesia] = await db.select({ codigo: iglesias.codigo }).from(iglesias)
+      .where(and(eq(iglesias.codigo, iglesiaCodigo), eq(iglesias.estado, "activa"))).limit(1);
+    if (!iglesia) return jsonError("La iglesia seleccionada no existe o está inactiva", 400);
+
     const result = await db.transaction(async tx => {
       const [movimiento] = await tx.insert(movimientosCuentas).values({
         fecha,
+        iglesiaCodigo,
         referencia,
         concepto,
         creadoPor: user.id,
@@ -93,7 +101,7 @@ export async function POST(request: Request) {
         accion: "Registró movimiento contable",
         entidad: "movimientos_cuentas",
         entidadId: movimiento.id,
-        detalle: `${fecha} · ${concepto}`,
+        detalle: `${fecha} · Iglesia ${iglesiaCodigo} · ${concepto}`,
       });
 
       return { movimiento, detalles: detallesCreados };

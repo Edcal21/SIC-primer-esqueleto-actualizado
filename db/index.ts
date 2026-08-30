@@ -3,8 +3,6 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 
-let client: ReturnType<typeof postgres> | undefined;
-
 export function getDb() {
   const { DATABASE_URL } = env as unknown as { DATABASE_URL?: string };
 
@@ -14,7 +12,7 @@ export function getDb() {
     );
   }
 
-  client ??= postgres(DATABASE_URL, {
+  const client = postgres(DATABASE_URL, {
     max: 1,
     prepare: false,
     connect_timeout: 5,

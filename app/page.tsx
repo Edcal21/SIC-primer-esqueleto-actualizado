@@ -10,6 +10,7 @@ type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: nu
 type PermisoAdmin = { id: Permiso; descripcion: string };
 type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
+type Iglesia = { codigo: string; nombre: string };
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
@@ -89,6 +90,17 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [iglesias, setIglesias] = useState<Iglesia[]>([]);
+
+  useEffect(() => {
+    fetch("/api/iglesias")
+      .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el catálogo de iglesias");
+        setIglesias(result.iglesias ?? []);
+      })
+      .catch(cause => setError(cause instanceof Error ? cause.message : "No se pudo cargar el catálogo de iglesias"));
+  }, []);
 
   useEffect(() => {
     fetch("/api/catalogo/cuentas")
@@ -116,6 +128,7 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         fecha: form.get("fecha"),
+        iglesiaCodigo: form.get("iglesiaCodigo"),
         referencia: form.get("referencia"),
         concepto: form.get("concepto"),
         detalles: [{
@@ -133,7 +146,7 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
     notify("Movimiento guardado en PostgreSQL");
   }
 
-  return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre débitos y créditos usando cuentas activas del catálogo contable.</p></div></div>{!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}<form className="panel formPanel" onSubmit={guardar}><div className="formGrid"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Tipo<select name="tipo" required><option value="debito">Débito</option><option value="credito">Crédito</option></select></label><label className="wide">Cuenta<select name="cuenta" required disabled={loading || !cuentas.length}><option value="">{loading ? "Cargando catálogo..." : "Seleccione una cuenta"}</option>{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.codigo} · {cuenta.descripcion} · {cuenta.naturaleza}</option>)}</select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label>Monto C$<input name="monto" type="number" required min="0.01" step="0.01"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div>{cuentas.length ? <div className="accountHint">{cuentas.length} cuentas de movimiento disponibles desde PostgreSQL.</div> : null}{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving || loading || !cuentas.length}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
+  return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre débitos y créditos usando iglesias y cuentas activas de los catálogos.</p></div></div>{!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}<form className="panel formPanel" onSubmit={guardar}><div className="formGrid"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Tipo<select name="tipo" required><option value="debito">Débito</option><option value="credito">Crédito</option></select></label><label className="wide">Iglesia<select name="iglesiaCodigo" required defaultValue="" disabled={!iglesias.length}><option value="" disabled>{iglesias.length ? "Seleccione una iglesia" : "Cargando iglesias…"}</option>{iglesias.map(iglesia=><option key={iglesia.codigo} value={iglesia.codigo}>{iglesia.codigo} · {iglesia.nombre}</option>)}</select></label><label className="wide">Cuenta<select name="cuenta" required disabled={loading || !cuentas.length}><option value="">{loading ? "Cargando catálogo..." : "Seleccione una cuenta"}</option>{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.codigo} · {cuenta.descripcion} · {cuenta.naturaleza}</option>)}</select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label>Monto C$<input name="monto" type="number" required min="0.01" step="0.01"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div>{cuentas.length ? <div className="accountHint">{cuentas.length} cuentas de movimiento y {iglesias.length} iglesias disponibles desde PostgreSQL.</div> : null}{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving || loading || !cuentas.length || !iglesias.length}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
 }
 
 function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {

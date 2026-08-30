@@ -100,6 +100,7 @@ El catálogo fuente de 761 filas no forma parte del repositorio y debe validarse
 app/                 Interfaz principal y rutas API
   api/auth/          Inicio, consulta y cierre de sesión
   api/movimientos/   Registro y consulta de movimientos contables
+  api/iglesias/      Catálogo de iglesias disponible para movimientos
   api/banco/         Consulta y carga de reportes bancarios
   api/reportes/      Generación y descarga de reportes
   api/auditoria/     Consulta de eventos de auditoría
@@ -119,6 +120,7 @@ tests/               Pruebas automatizadas
 | `/api/auth/me` | `GET` | Devuelve la sesión actual. |
 | `/api/auth/logout` | `POST` | Elimina la sesión. |
 | `/api/movimientos` | `GET`, `POST` | Consulta o registra encabezados y detalles de movimientos. |
+| `/api/iglesias` | `GET` | Lista las iglesias activas y sus códigos. |
 | `/api/banco/reportes` | `GET`, `POST` | Consulta o recibe archivos bancarios. |
 | `/api/reportes` | `GET` | Consulta reportes disponibles. |
 | `/api/reportes/:tipo` | `GET` | Genera un reporte y permite salida CSV. |
