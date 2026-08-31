@@ -16,7 +16,9 @@ export async function GET(request: Request) {
       nombre: row.nombre,
       fecha: row.fecha,
       estado: row.estado,
+      archivoTamano: row.archivoTamano,
       cargadoPor: row.cargadoPorNombre,
+      creadoEn: row.creadoEn,
     })),
   }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -45,7 +47,9 @@ export async function POST(request: Request) {
         nombre: reporte.nombre,
         fecha: reporte.fecha,
         estado: reporte.estado,
+        archivoTamano: reporte.archivoTamano,
         cargadoPor: reporte.cargadoPorNombre,
+        creadoEn: reporte.creadoEn,
       },
     }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

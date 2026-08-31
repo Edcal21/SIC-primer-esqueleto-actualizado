@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
 type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
-type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string };
+type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string };
 type Evento = { fecha: string; usuario: string; accion: string; resultado: string; detalle?: string | null };
 type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; totalLineas: number; totalDebe: string; totalHaber: string; creadoEn: string };
 type PermisoAdmin = { id: Permiso; descripcion: string };
@@ -360,10 +360,44 @@ function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
 }
 
 function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: string) => void }) {
-  const [reportes, setReportes] = useState<Reporte[]>([]); const [file, setFile] = useState<File | null>(null); const [error,setError]=useState("");
-  useEffect(()=>{ fetch("/api/banco/reportes").then(r=>r.json()).then(data=>setReportes(data.reportes??[])); },[]);
-  async function upload(){ if(!file) return setError("Seleccione un archivo CSV o Excel"); const form=new FormData(); form.append("archivo",file); const response=await fetch("/api/banco/reportes",{method:"POST",body:form}); const result=await response.json(); if(!response.ok)return setError(result.error); setReportes(current=>[result.reporte,...current]); setFile(null); setError(""); notify("Reporte bancario recibido"); }
-  return <><div className="pageHead"><div><span className="eyebrow">BANCOS</span><h1>Reportes bancarios</h1><p>Consulta de archivos recibidos y su estado de procesamiento.</p></div></div>{canUpload?<section className="panel uploadPanel"><div><h2>Subir reporte del banco</h2><p>Formatos permitidos: CSV, XLS o XLSX · máximo 10 MB.</p></div><input type="file" accept=".csv,.xls,.xlsx" onChange={event=>setFile(event.target.files?.[0]??null)}/><button className="primary" onClick={upload}>Subir reporte</button>{error?<span className="uploadError">{error}</span>:null}</section>:<div className="readOnlyBanner">Acceso de solo lectura: puede consultar reportes, pero no cargarlos.</div>}<section className="panel tablePanel"><div className="panelHead"><div><h2>Historial bancario</h2><p>{reportes.length} archivos disponibles</p></div></div><div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>FECHA</th><th>CARGADO POR</th><th>ESTADO</th></tr></thead><tbody>{reportes.map(item=><tr key={item.id}><td><b>{item.nombre}</b></td><td>{item.fecha}</td><td>{item.cargadoPor}</td><td><span className="status done">{item.estado}</span></td></tr>)}</tbody></table></div></section></>;
+  const [reportes, setReportes] = useState<Reporte[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [error,setError]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+
+  async function cargarReportes() {
+    setLoading(true);
+    const response = await fetch("/api/banco/reportes");
+    const data = await response.json();
+    if (response.ok) {
+      setReportes(data.reportes ?? []);
+      setError("");
+    } else {
+      setError(data.error ?? "No se pudo cargar el historial bancario");
+    }
+    setLoading(false);
+  }
+
+  useEffect(()=>{ void Promise.resolve().then(cargarReportes); },[]);
+
+  async function upload(event: FormEvent<HTMLFormElement>){
+    event.preventDefault();
+    if(!file) return setError("Seleccione un archivo CSV o Excel");
+    setSaving(true); setError("");
+    const form=new FormData(); form.append("archivo",file);
+    const response=await fetch("/api/banco/reportes",{method:"POST",body:form});
+    const result=await response.json();
+    setSaving(false);
+    if(!response.ok)return setError(result.error);
+    setReportes(current=>[result.reporte,...current]);
+    setFile(null);
+    event.currentTarget.reset();
+    notify("Reporte bancario guardado en PostgreSQL");
+  }
+
+  const ultimo = reportes[0];
+  return <><div className="pageHead"><div><span className="eyebrow">BANCOS</span><h1>Reportes bancarios</h1><p>Consulta de archivos recibidos y su estado de procesamiento desde la base de datos.</p></div></div><section className="metrics compactMetrics"><article className="metric featured"><p>Archivos recibidos</p><strong>{loading?"...":reportes.length}</strong><small>Registros guardados en PostgreSQL</small></article><article className="metric"><p>Última carga</p><strong>{ultimo?new Date(ultimo.creadoEn??ultimo.fecha).toLocaleDateString("es-NI"):"Sin cargas"}</strong><small>{ultimo?.nombre??"No hay reportes bancarios"}</small></article><article className="metric"><p>Estado reciente</p><strong>{ultimo?.estado??"Pendiente"}</strong><span className={statusClass(ultimo?.estado??"pendiente")}>{ultimo?.estado??"sin archivo"}</span></article></section>{canUpload?<form className="panel uploadPanel bankUploadPanel" onSubmit={upload}><div><h2>Subir reporte del banco</h2><p>El archivo quedará registrado en la tabla reportes_bancarios para auditoría y seguimiento.</p></div><label className="fileDrop"><input type="file" accept=".csv,.xls,.xlsx" onChange={event=>setFile(event.target.files?.[0]??null)}/><span>{file?file.name:"Seleccionar CSV o Excel"}</span>{file?<small>{Math.round(file.size/1024)} KB · listo para registrar</small>:<small>Formatos permitidos: CSV, XLS o XLSX · máximo 10 MB</small>}</label><button className="primary" type="submit" disabled={saving}>{saving?"Subiendo...":"Subir reporte"}</button>{error?<span className="uploadError">{error}</span>:null}</form>:<div className="readOnlyBanner">Acceso de solo lectura: puede consultar reportes, pero no cargarlos.</div>}<section className="panel tablePanel"><div className="panelHead"><div><h2>Historial bancario</h2><p>{loading?"Cargando desde PostgreSQL":`${reportes.length} archivos disponibles`}</p></div><button onClick={cargarReportes}>Actualizar</button></div><div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>FECHA</th><th>TAMAÑO</th><th>CARGADO POR</th><th>ESTADO</th></tr></thead><tbody>{reportes.map(item=><tr key={item.id}><td><b>{item.nombre}</b><small>ID {item.id.slice(0,8)}</small></td><td>{new Date(item.fecha).toLocaleDateString("es-NI")}</td><td>{item.archivoTamano?`${Math.round(item.archivoTamano/1024)} KB`:"-"}</td><td>{item.cargadoPor}</td><td><span className={statusClass(item.estado)}>{item.estado}</span></td></tr>)}</tbody></table></div>{!loading && !reportes.length?<div className="emptyReport">Todavía no hay reportes bancarios guardados. Use el formulario superior para registrar el primer archivo.</div>:null}</section></>;
 }
 
 function Importaciones({ notify }: { notify: (message: string) => void }) {
