@@ -9,18 +9,23 @@ export async function GET(request: Request) {
   if (!user) return jsonError("No autenticado", 401);
   if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
   const db = getDb();
-  const rows = await db.select().from(reportesBancarios).orderBy(desc(reportesBancarios.creadoEn)).limit(50);
-  return Response.json({
-    reportes: rows.map(row => ({
-      id: row.id,
-      nombre: row.nombre,
-      fecha: row.fecha,
-      estado: row.estado,
-      archivoTamano: row.archivoTamano,
-      cargadoPor: row.cargadoPorNombre,
-      creadoEn: row.creadoEn,
-    })),
-  }, { headers: { "Cache-Control": "no-store" } });
+  try {
+    const rows = await db.select().from(reportesBancarios).orderBy(desc(reportesBancarios.creadoEn)).limit(50);
+    return Response.json({
+      reportes: rows.map(row => ({
+        id: row.id,
+        nombre: row.nombre,
+        fecha: row.fecha,
+        estado: row.estado,
+        archivoTamano: row.archivoTamano,
+        cargadoPor: row.cargadoPorNombre,
+        creadoEn: row.creadoEn,
+      })),
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Bank report listing failed", error);
+    return jsonError("No se pudo cargar el historial bancario", 500);
+  }
 }
 
 export async function POST(request: Request) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
 type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
@@ -11,6 +11,7 @@ type PermisoAdmin = { id: Permiso; descripcion: string };
 type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
 type Iglesia = { codigo: string; nombre: string };
+type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO" };
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
@@ -19,6 +20,8 @@ type DetalleMinuta = { tipo: "debito" | "credito"; cuentaCodigo: string; monto: 
 type ResumenSistema = { cuentas: number; cuentasMovimiento: number; iglesiasActivas: number; importaciones: number; movimientos: number; reportesBanco: number; eventosAuditoria: number; ultimaImportacion?: ImportacionBalanza; ultimoMovimiento?: { fecha: string; concepto: string; referencia?: string | null; creadoEn: string }; eventos: { fecha: string; usuario: string; modulo: string; accion: string; resultado: string }[] };
 type ConfiguracionSistema = { institucionNombre: string; sistemaNombre: string; sistemaDescripcion: string; moneda: "NIO"; logoLogin: string };
 type OpcionReporte = { tipo: TipoReporte; titulo: string; descripcion: string; icono: string };
+type ModalState = { title: string; message: string; confirmLabel?: string; onConfirm: () => void | Promise<void>; isDanger?: boolean };
+type RequestConfirmation = (modal: ModalState) => void;
 
 const nombresRol = { administrador: "Administrador", contador_general: "Contador general", operador_bancario: "Operador bancario", auditor_general: "Auditor general" };
 const etiquetasPermiso: Record<Permiso, string> = {
@@ -59,11 +62,21 @@ export default function Home() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [config, setConfig] = useState<ConfiguracionSistema>(defaultConfig);
+  const [modal, setModal] = useState<ModalState | null>(null);
+  const [modalBusy, setModalBusy] = useState(false);
+  const noticeTimer = useRef<number | null>(null);
 
   useEffect(() => { fetch("/api/auth/me").then(async response => { if (response.ok) setUser((await response.json()).user); }).finally(() => setChecking(false)); }, []);
   useEffect(() => { fetch("/api/configuracion").then(async response => { if (response.ok) setConfig((await response.json()).configuracion ?? defaultConfig); }).catch(() => setConfig(defaultConfig)); }, []);
   const can = (permission: Permiso) => Boolean(user?.permisos.includes(permission));
-  const notify = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(""), 2600); };
+  const notify = (message: string) => {
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = window.setTimeout(() => setNotice(""), 3600);
+  };
+  const requestConfirmation: RequestConfirmation = nextModal => setModal(nextModal);
+
+  useEffect(() => () => { if (noticeTimer.current) window.clearTimeout(noticeTimer.current); }, []);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError("");
@@ -75,15 +88,36 @@ export default function Home() {
   }
 
   async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setUser(null); setActive("Resumen"); }
+  async function confirmModal() {
+    if (!modal || modalBusy) return;
+    setModalBusy(true);
+    try {
+      await modal.onConfirm();
+      setModal(null);
+    } catch {
+      setModal(current => current ? { ...current, message: "No se pudo completar la operación. Revise la conexión e inténtelo nuevamente." } : current);
+    } finally { setModalBusy(false); }
+  }
   if (checking) return <main className="authScreen"><div className="authCard"><b>Validando sesión…</b></div></main>;
   if (!user) return <Login onSubmit={login} error={error} config={config} />;
   const allowedMenu = menu.filter(item => can(item.permiso));
 
   return <main className="shell">
-    <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActive} logout={logout} config={config}/>
-    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
-    {notice ? <div className="toast">✓ {notice}</div> : null}
+    <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActive} logout={()=>requestConfirmation({ title: "Cerrar sesión segura", message: "Se cerrará la sesión actual y deberá autenticarse nuevamente para continuar.", confirmLabel: "Cerrar sesión", onConfirm: logout })} config={config}/>
+    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : <Modulo nombre={active} user={user}/>}</div></section>
+    {notice ? <div className="toast" role="status" aria-live="polite"><span className="toastIcon" aria-hidden="true">✓</span><span>{notice}</span></div> : null}
+    {modal ? <ConfirmModal modal={modal} busy={modalBusy} onCancel={()=>{ if (!modalBusy) setModal(null); }} onConfirm={confirmModal}/> : null}
   </main>;
+}
+
+function ConfirmModal({ modal, busy, onCancel, onConfirm }: { modal: ModalState; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [busy, onCancel]);
+
+  return <div className="modalOverlay"><section className={`modalCard ${modal.isDanger ? "danger" : ""}`} role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title"><div className="modalHead"><span className="modalShield" aria-hidden="true">{modal.isDanger ? "!" : "✓"}</span><b id="confirm-modal-title">{modal.title}</b></div><div className="modalBody">{modal.message}</div><div className="modalFoot"><button className="secondary" type="button" onClick={onCancel} disabled={busy}>Cancelar</button><button className="primary" type="button" onClick={onConfirm} disabled={busy}>{busy ? "Procesando..." : modal.confirmLabel ?? "Confirmar"}</button></div></section></div>;
 }
 
 function Sidebar({ user, active, allowedMenu, setActive, logout, config }: { user: User; active: string; allowedMenu: typeof menu; setActive: (value: string) => void; logout: () => void; config: ConfiguracionSistema }) {
@@ -133,13 +167,14 @@ function Resumen({ user, setActive }: { user: User; setActive: (value: string) =
   return <><div className="pageHead"><div><span className="eyebrow">{nombresRol[user.rol].toUpperCase()}</span><h1>Resumen operativo</h1><p>Estado actual de catálogos, cargas, movimientos y trazabilidad.</p></div></div>{error?<div className="authError">{error}</div>:null}<section className="metrics workflowMetrics"><article className="metric featured"><p>Rol activo</p><strong>{nombresRol[user.rol]}</strong><span className="pill ready">Sesión válida</span></article><article className="metric"><p>Cuentas contables</p><strong>{resumen?.cuentas ?? "..."}</strong><small>{resumen?.cuentasMovimiento ?? 0} disponibles para minutas</small></article><article className="metric"><p>Iglesias activas</p><strong>{resumen?.iglesiasActivas ?? "..."}</strong><small>Catálogo institucional</small></article><article className="metric"><p>Minutas registradas</p><strong>{resumen?.movimientos ?? "..."}</strong><small>{resumen?.ultimoMovimiento ? `Última: ${new Date(resumen.ultimoMovimiento.creadoEn).toLocaleDateString("es-NI")}` : "Sin registros"}</small></article></section><section className="grid"><article className="panel activityPanel"><div className="panelHead"><div><h2>Flujo contable</h2><p>Datos conectados a PostgreSQL</p></div></div><div className="statusList"><button onClick={()=>setActive("Importaciones")}><b>Balanzas importadas</b><span>{resumen?.importaciones ?? 0}</span></button><button onClick={()=>setActive("Bancos")}><b>Reportes bancarios</b><span>{resumen?.reportesBanco ?? 0}</span></button><button onClick={()=>setActive("Auditoría")}><b>Eventos auditados</b><span>{resumen?.eventosAuditoria ?? 0}</span></button></div></article><article className="panel activityPanel"><div className="panelHead"><div><h2>Actividad reciente</h2><p>Últimos eventos del sistema</p></div></div>{resumen?.eventos.length ? <div className="auditMini">{resumen.eventos.map(evento=><div key={`${evento.fecha}-${evento.accion}`}><b>{evento.modulo}</b><span>{evento.accion}</span><small>{evento.usuario} · {new Date(evento.fecha).toLocaleString("es-NI")}</small></div>)}</div> : <div className="emptySmall">Sin actividad registrada.</div>}</article></section><section className="panel shortcutPanel"><div className="panelHead"><div><h2>Accesos de trabajo</h2><p>Módulos habilitados para este usuario</p></div></div><div className="shortcutGrid">{accesos.map(item=><button key={item.nombre} onClick={()=>setActive(item.nombre)}><MenuIcon name={item.icono}/><b>{item.nombre}</b><small>{etiquetasPermiso[item.permiso]}</small></button>)}</div></section></>;
 }
 
-function Movimiento({ notify }: { notify: (message: string) => void }) {
+function Movimiento({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [cuentas, setCuentas] = useState<CuentaMovimiento[]>([]);
   const [detalles, setDetalles] = useState<DetalleMinuta[]>([{ tipo: "debito", cuentaCodigo: "", monto: "" }, { tipo: "credito", cuentaCodigo: "", monto: "" }]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [iglesias, setIglesias] = useState<Iglesia[]>([]);
+  const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
 
   useEffect(() => {
     fetch("/api/iglesias")
@@ -162,9 +197,19 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    fetch("/api/cuentas-bancarias")
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "No se pudo cargar el catálogo de cuentas bancarias");
+        setCuentasBancarias(data.cuentasBancarias ?? []);
+      })
+      .catch(cause => setError(cause instanceof Error ? cause.message : "No se pudo cargar el catálogo de cuentas bancarias"));
+  }, []);
+
   async function guardar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true); setError("");
+    setError("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const detallesPayload = detalles.map((detalle, index) => {
@@ -172,32 +217,42 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
       return { tipo: detalle.tipo, cuentaCodigo: cuenta?.codigo, cuentaNombre: cuenta?.descripcion, monto: detalle.monto, orden: index + 1 };
     });
     if (detallesPayload.some(detalle => !detalle.cuentaCodigo || !detalle.monto)) {
-      setSaving(false);
       return setError("Complete cuenta y monto en todas las líneas");
     }
     const totalDebitos = detalles.filter(detalle => detalle.tipo === "debito").reduce((total, detalle) => total + Number(detalle.monto || 0), 0);
     const totalCreditos = detalles.filter(detalle => detalle.tipo === "credito").reduce((total, detalle) => total + Number(detalle.monto || 0), 0);
     if (Math.abs(totalDebitos - totalCreditos) >= 0.01) {
-      setSaving(false);
       return setError("La minuta debe cuadrar: débitos y créditos tienen que ser iguales");
     }
-    const response = await fetch("/api/movimientos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fecha: form.get("fecha"),
-        iglesiaCodigo: form.get("iglesiaCodigo"),
-        referencia: form.get("referencia"),
-        concepto: form.get("concepto"),
-        detalles: detallesPayload,
-      }),
+    const iglesia = iglesias.find(item=>item.codigo===String(form.get("iglesiaCodigo")??""));
+    const cuentaBancaria = cuentasBancarias.find(item=>item.numeroCuenta===String(form.get("cuentaBancariaNumero")??""));
+    requestConfirmation({
+      title: "Confirmar asiento contable",
+      message: `Se registrará una minuta por ${dinero.format(totalDebitos)} para ${iglesia?.nombre ?? "la iglesia seleccionada"} en ${cuentaBancaria?.nombre ?? "la cuenta bancaria seleccionada"}. Esta operación quedará registrada en la auditoría del sistema.`,
+      confirmLabel: "Registrar movimiento",
+      onConfirm: async () => {
+        setSaving(true);
+        try {
+          const response = await fetch("/api/movimientos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fecha: form.get("fecha"),
+              iglesiaCodigo: form.get("iglesiaCodigo"),
+              cuentaBancariaNumero: form.get("cuentaBancariaNumero"),
+              referencia: form.get("referencia"),
+              concepto: form.get("concepto"),
+              detalles: detallesPayload,
+            }),
+          });
+          const result = await response.json();
+          if (!response.ok) return setError(result.error ?? "No se pudo guardar el movimiento");
+          formElement.reset();
+          setDetalles([{ tipo: "debito", cuentaCodigo: "", monto: "" }, { tipo: "credito", cuentaCodigo: "", monto: "" }]);
+          notify("Movimiento registrado y auditado correctamente");
+        } finally { setSaving(false); }
+      },
     });
-    const result = await response.json();
-    setSaving(false);
-    if (!response.ok) return setError(result.error ?? "No se pudo guardar el movimiento");
-    formElement.reset();
-    setDetalles([{ tipo: "debito", cuentaCodigo: "", monto: "" }, { tipo: "credito", cuentaCodigo: "", monto: "" }]);
-    notify("Movimiento guardado en PostgreSQL");
   }
 
   const totalDebitos = detalles.filter(detalle => detalle.tipo === "debito").reduce((total, detalle) => total + Number(detalle.monto || 0), 0);
@@ -207,10 +262,10 @@ function Movimiento({ notify }: { notify: (message: string) => void }) {
   const removeDetalle = (index: number) => setDetalles(current => current.length > 2 ? current.filter((_, itemIndex) => itemIndex !== index) : current);
 
   const isBalanced = Math.abs(diferencia) < 0.01 && totalDebitos > 0 && totalCreditos > 0;
-  return <><div className="pageHead movementHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre una minuta cuadrada usando iglesias y cuentas activas de los catálogos.</p></div><div className={isBalanced?"balanceSummary balanced":"balanceSummary pending"}><span>Débitos <b>{dinero.format(totalDebitos)}</b></span><span>Créditos <b>{dinero.format(totalCreditos)}</b></span><span className={isBalanced?"positive":"negative"}>Diferencia <b>{isBalanced?"Cuadrado":dinero.format(diferencia)}</b></span></div></div>{!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}<form className="panel formPanel movementPanel" onSubmit={guardar}><div className="formGrid movementMeta"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label className="wide">Iglesia<select name="iglesiaCodigo" required defaultValue="" disabled={!iglesias.length}><option value="" disabled>{iglesias.length ? "Seleccione una iglesia" : "Cargando iglesias..."}</option>{iglesias.map(iglesia=><option key={iglesia.codigo} value={iglesia.codigo}>{iglesia.codigo} · {iglesia.nombre}</option>)}</select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div><div className="detailEditor"><div className="detailHeader"><b>Detalle contable</b><button className="secondary" type="button" onClick={()=>setDetalles(current=>[...current,{tipo:"debito",cuentaCodigo:"",monto:""}])}>Agregar línea</button></div><div className="detailTableHead"><span>Tipo</span><span>Cuenta contable</span><span>Monto NIO</span><span/></div>{detalles.map((detalle,index)=><div className="detailRow" key={index}><select className={detalle.tipo} value={detalle.tipo} onChange={event=>updateDetalle(index,{tipo:event.target.value as DetalleMinuta["tipo"]})}><option value="debito">Débito</option><option value="credito">Crédito</option></select><select value={detalle.cuentaCodigo} onChange={event=>updateDetalle(index,{cuentaCodigo:event.target.value})} required disabled={loading || !cuentas.length}><option value="">{loading ? "Cargando catálogo..." : "Seleccione cuenta"}</option>{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.codigo} · {cuenta.descripcion}</option>)}</select><input value={detalle.monto} onChange={event=>updateDetalle(index,{monto:event.target.value})} type="number" required min="0.01" step="0.01" placeholder="0.00"/><button className="secondary iconButton" type="button" onClick={()=>removeDetalle(index)} disabled={detalles.length<=2} aria-label="Eliminar línea">×</button></div>)}</div>{cuentas.length ? <div className="accountHint">{cuentas.length} cuentas de movimiento y {iglesias.length} iglesias disponibles desde PostgreSQL.</div> : null}{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving || loading || !cuentas.length || !iglesias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
+  return <><div className="pageHead movementHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre una minuta cuadrada usando iglesias, cuentas bancarias y cuentas contables activas.</p></div><div className={isBalanced?"balanceSummary balanced":"balanceSummary pending"}><span>Débitos <b>{dinero.format(totalDebitos)}</b></span><span>Créditos <b>{dinero.format(totalCreditos)}</b></span><span className={isBalanced?"positive":"negative"}>Diferencia <b>{isBalanced?"Cuadrado":dinero.format(diferencia)}</b></span></div></div>{!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}<form className="panel formPanel movementPanel" onSubmit={guardar}><div className="formGrid movementMeta"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Cuenta bancaria<select name="cuentaBancariaNumero" required defaultValue="" disabled={!cuentasBancarias.length}><option value="" disabled>{cuentasBancarias.length ? "Seleccione una cuenta bancaria" : "Cargando cuentas bancarias..."}</option>{cuentasBancarias.map(cuenta=><option key={cuenta.numeroCuenta} value={cuenta.numeroCuenta}>{cuenta.nombre} · {cuenta.numeroCuenta} · {cuenta.moneda}</option>)}</select></label><label className="wide">Iglesia<select name="iglesiaCodigo" required defaultValue="" disabled={!iglesias.length}><option value="" disabled>{iglesias.length ? "Seleccione una iglesia" : "Cargando iglesias..."}</option>{iglesias.map(iglesia=><option key={iglesia.codigo} value={iglesia.codigo}>{iglesia.codigo} · {iglesia.nombre}</option>)}</select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div><div className="detailEditor"><div className="detailHeader"><b>Detalle contable</b><button className="secondary" type="button" onClick={()=>setDetalles(current=>[...current,{tipo:"debito",cuentaCodigo:"",monto:""}])}>Agregar línea</button></div><div className="detailTableHead"><span>Tipo</span><span>Cuenta contable</span><span>Monto NIO</span><span/></div>{detalles.map((detalle,index)=><div className="detailRow" key={index}><select className={detalle.tipo} value={detalle.tipo} onChange={event=>updateDetalle(index,{tipo:event.target.value as DetalleMinuta["tipo"]})}><option value="debito">Débito</option><option value="credito">Crédito</option></select><select value={detalle.cuentaCodigo} onChange={event=>updateDetalle(index,{cuentaCodigo:event.target.value})} required disabled={loading || !cuentas.length}><option value="">{loading ? "Cargando catálogo..." : "Seleccione cuenta"}</option>{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.codigo} · {cuenta.descripcion}</option>)}</select><input value={detalle.monto} onChange={event=>updateDetalle(index,{monto:event.target.value})} type="number" required min="0.01" step="0.01" placeholder="0.00"/><button className="secondary iconButton" type="button" onClick={()=>removeDetalle(index)} disabled={detalles.length<=2} aria-label="Eliminar línea">×</button></div>)}</div>{cuentas.length ? <div className="accountHint">{cuentas.length} cuentas de movimiento, {iglesias.length} iglesias y {cuentasBancarias.length} cuentas bancarias disponibles desde PostgreSQL.</div> : null}{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving || loading || !cuentas.length || !iglesias.length || !cuentasBancarias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
 }
 
-function CatalogoContable({ notify }: { notify: (message: string) => void }) {
+function CatalogoContable({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [cuentas, setCuentas] = useState<CuentaMovimiento[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -260,7 +315,17 @@ function CatalogoContable({ notify }: { notify: (message: string) => void }) {
     notify("Cuenta contable actualizada");
   }
 
-  return <><div className="pageHead"><div><span className="eyebrow">CATÁLOGO</span><h1>Catálogo contable</h1><p>Administre cuentas reales disponibles para importaciones, reportes y minutas.</p></div></div><section className="adminLayout"><form className="panel formPanel" onSubmit={crearCuenta}><div className="panelHead compact"><div><h2>Nueva cuenta</h2><p>Use códigos contables de 8 dígitos.</p></div></div><div className="formGrid"><label>Código<input name="codigo" required minLength={8} maxLength={8} inputMode="numeric" placeholder="11010201"/></label><label>Descripción<input name="descripcion" required placeholder="Nombre de la cuenta"/></label><label>Naturaleza<select name="naturaleza" defaultValue="deudora"><option value="deudora">Deudora</option><option value="acreedora">Acreedora</option></select></label><label>Flujo<select name="clasificacionFlujo" defaultValue="no aplica"><option value="operación">Operación</option><option value="inversión">Inversión</option><option value="financiamiento">Financiamiento</option><option value="no aplica">No aplica</option></select></label><label className="checkLine"><input name="esCuentaMovimiento" type="checkbox" defaultChecked/>Cuenta de movimiento</label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear cuenta"}</button></div></form><section className="panel rolesPanel"><div className="panelHead compact"><div><h2>Resumen</h2><p>{cuentas.length} cuentas activas</p></div></div><article className="metric inlineMetric"><p>Cuentas de movimiento</p><strong>{cuentas.filter(cuenta=>cuenta.esCuentaMovimiento).length}</strong></article><article className="metric inlineMetric"><p>Operación</p><strong>{cuentas.filter(cuenta=>cuenta.clasificacionFlujo==="operación").length}</strong></article></section></section><section className="panel tablePanel"><div className="panelHead"><div><h2>Cuentas registradas</h2><p>Fuente: PostgreSQL</p></div></div><div className="tableWrap"><table><thead><tr><th>CÓDIGO</th><th>DESCRIPCIÓN</th><th>NATURALEZA</th><th>FLUJO</th><th>MOVIMIENTO</th><th>ESTADO</th></tr></thead><tbody>{cuentas.map(cuenta=><tr key={cuenta.codigo}><td><b>{cuenta.codigo}</b></td><td>{cuenta.descripcion}</td><td>{cuenta.naturaleza}</td><td>{cuenta.clasificacionFlujo}</td><td><button className={cuenta.esCuentaMovimiento?"status done":"status pending"} onClick={()=>actualizarCuenta(cuenta.codigo,{esCuentaMovimiento:!cuenta.esCuentaMovimiento})}>{cuenta.esCuentaMovimiento?"sí":"no"}</button></td><td><button className={cuenta.estado==="activa"?"status done":"status pending"} onClick={()=>actualizarCuenta(cuenta.codigo,{estado:cuenta.estado==="activa"?"inactiva":"activa"})}>{cuenta.estado}</button></td></tr>)}</tbody></table></div>{!cuentas.length?<div className="emptyReport">Todavía no hay cuentas activas. Puede crearlas aquí o importarlas desde una balanza.</div>:null}</section></>;
+  function confirmarActualizacionCuenta(cuenta: CuentaMovimiento, changes: Partial<CuentaMovimiento>, message: string, isDanger = false) {
+    requestConfirmation({
+      title: "Confirmar cambio de catálogo",
+      message,
+      confirmLabel: "Aplicar cambio",
+      isDanger,
+      onConfirm: () => actualizarCuenta(cuenta.codigo, changes),
+    });
+  }
+
+  return <><div className="pageHead"><div><span className="eyebrow">CATÁLOGO</span><h1>Catálogo contable</h1><p>Administre cuentas reales disponibles para importaciones, reportes y minutas.</p></div></div><section className="adminLayout"><form className="panel formPanel" onSubmit={crearCuenta}><div className="panelHead compact"><div><h2>Nueva cuenta</h2><p>Use códigos contables de 8 dígitos.</p></div></div><div className="formGrid"><label>Código<input name="codigo" required minLength={8} maxLength={8} inputMode="numeric" placeholder="11010201"/></label><label>Descripción<input name="descripcion" required placeholder="Nombre de la cuenta"/></label><label>Naturaleza<select name="naturaleza" defaultValue="deudora"><option value="deudora">Deudora</option><option value="acreedora">Acreedora</option></select></label><label>Flujo<select name="clasificacionFlujo" defaultValue="no aplica"><option value="operación">Operación</option><option value="inversión">Inversión</option><option value="financiamiento">Financiamiento</option><option value="no aplica">No aplica</option></select></label><label className="checkLine"><input name="esCuentaMovimiento" type="checkbox" defaultChecked/>Cuenta de movimiento</label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear cuenta"}</button></div></form><section className="panel rolesPanel"><div className="panelHead compact"><div><h2>Resumen</h2><p>{cuentas.length} cuentas activas</p></div></div><article className="metric inlineMetric"><p>Cuentas de movimiento</p><strong>{cuentas.filter(cuenta=>cuenta.esCuentaMovimiento).length}</strong></article><article className="metric inlineMetric"><p>Operación</p><strong>{cuentas.filter(cuenta=>cuenta.clasificacionFlujo==="operación").length}</strong></article></section></section><section className="panel tablePanel"><div className="panelHead"><div><h2>Cuentas registradas</h2><p>Fuente: PostgreSQL</p></div></div><div className="tableWrap"><table><thead><tr><th>CÓDIGO</th><th>DESCRIPCIÓN</th><th>NATURALEZA</th><th>FLUJO</th><th>MOVIMIENTO</th><th>ESTADO</th></tr></thead><tbody>{cuentas.map(cuenta=><tr key={cuenta.codigo}><td><b>{cuenta.codigo}</b></td><td>{cuenta.descripcion}</td><td>{cuenta.naturaleza}</td><td>{cuenta.clasificacionFlujo}</td><td><button type="button" className={cuenta.esCuentaMovimiento?"status done":"status pending"} onClick={()=>confirmarActualizacionCuenta(cuenta,{esCuentaMovimiento:!cuenta.esCuentaMovimiento},`${cuenta.esCuentaMovimiento?"Se retirará":"Se habilitará"} la cuenta ${cuenta.codigo} · ${cuenta.descripcion} para registrar movimientos.`,cuenta.esCuentaMovimiento)}>{cuenta.esCuentaMovimiento?"sí":"no"}</button></td><td><button type="button" className={cuenta.estado==="activa"?"status done":"status pending"} onClick={()=>confirmarActualizacionCuenta(cuenta,{estado:cuenta.estado==="activa"?"inactiva":"activa"},`${cuenta.estado==="activa"?"Se desactivará":"Se activará"} la cuenta ${cuenta.codigo} · ${cuenta.descripcion}.`,cuenta.estado==="activa")}>{cuenta.estado}</button></td></tr>)}</tbody></table></div>{!cuentas.length?<div className="emptyReport">Todavía no hay cuentas activas. Puede crearlas aquí o importarlas desde una balanza.</div>:null}</section></>;
 }
 
 function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
@@ -368,15 +433,18 @@ function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: s
 
   async function cargarReportes() {
     setLoading(true);
-    const response = await fetch("/api/banco/reportes");
-    const data = await response.json();
-    if (response.ok) {
-      setReportes(data.reportes ?? []);
-      setError("");
-    } else {
-      setError(data.error ?? "No se pudo cargar el historial bancario");
-    }
-    setLoading(false);
+    try {
+      const response = await fetch("/api/banco/reportes");
+      const data = await response.json().catch(() => ({})) as { reportes?: Reporte[]; error?: string };
+      if (response.ok) {
+        setReportes(data.reportes ?? []);
+        setError("");
+      } else {
+        setError(data.error ?? `No se pudo cargar el historial bancario (HTTP ${response.status})`);
+      }
+    } catch {
+      setError("No se pudo conectar con el servicio de reportes bancarios");
+    } finally { setLoading(false); }
   }
 
   useEffect(()=>{ void Promise.resolve().then(cargarReportes); },[]);
@@ -384,16 +452,20 @@ function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: s
   async function upload(event: FormEvent<HTMLFormElement>){
     event.preventDefault();
     if(!file) return setError("Seleccione un archivo CSV o Excel");
+    const formElement=event.currentTarget;
     setSaving(true); setError("");
     const form=new FormData(); form.append("archivo",file);
-    const response=await fetch("/api/banco/reportes",{method:"POST",body:form});
-    const result=await response.json();
-    setSaving(false);
-    if(!response.ok)return setError(result.error);
-    setReportes(current=>[result.reporte,...current]);
-    setFile(null);
-    event.currentTarget.reset();
-    notify("Reporte bancario guardado en PostgreSQL");
+    try {
+      const response=await fetch("/api/banco/reportes",{method:"POST",body:form});
+      const result=await response.json().catch(() => ({})) as { reporte?: Reporte; error?: string };
+      if(!response.ok || !result.reporte)return setError(result.error ?? `No se pudo guardar el reporte bancario (HTTP ${response.status})`);
+      setReportes(current=>[result.reporte!,...current]);
+      setFile(null);
+      formElement.reset();
+      notify("Reporte bancario guardado en PostgreSQL");
+    } catch {
+      setError("No se pudo conectar con el servicio de reportes bancarios");
+    } finally { setSaving(false); }
   }
 
   const ultimo = reportes[0];
@@ -455,13 +527,44 @@ const statusClass = (estado: string) => estado === "con_diferencias" || estado =
 function Reportes({canDownload}:{canDownload:boolean}){
   const initialYear = currentYear();
   const [opcionesReportes,setOpcionesReportes]=useState<OpcionReporte[]>(opcionesReportesIniciales);
-  const [tipo,setTipo]=useState<TipoReporte>("flujo-efectivo"),[granularidad,setGranularidad]=useState<Granularidad>("anio"),[periodo,setPeriodo]=useState(String(initialYear)),[comparar,setComparar]=useState(String(initialYear-1)),[reporte,setReporte]=useState<ReporteFinanciero|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState("");
+  const [tipo,setTipo]=useState<TipoReporte>("flujo-efectivo");
+  const [granularidad,setGranularidad]=useState<Granularidad>("anio");
+  const [periodo,setPeriodo]=useState(String(initialYear));
+  const [comparar,setComparar]=useState(String(initialYear-1));
+  const [reporte,setReporte]=useState<ReporteFinanciero|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
   const url=(selected=tipo,format?:string)=>`/api/reportes/${selected}?granularidad=${granularidad}&periodo=${encodeURIComponent(periodo)}&comparar=${encodeURIComponent(comparar)}${format?`&formato=${format}`:""}`;
-  async function generar(selected=tipo){setLoading(true);setError("");setTipo(selected);const response=await fetch(url(selected));const data=await response.json();if(response.ok)setReporte(data.reporte);else setError(data.error);setLoading(false);}
-  useEffect(()=>{fetch("/api/reportes").then(response=>response.json()).then(data=>{if(data.reportes?.length)setOpcionesReportes(data.reportes);}).catch(()=>setOpcionesReportes(opcionesReportesIniciales));const year=currentYear();fetch(`/api/reportes/flujo-efectivo?granularidad=anio&periodo=${year}&comparar=${year-1}`).then(response=>response.json().then(data=>({ok:response.ok,data}))).then(({ok,data})=>{if(ok)setReporte(data.reporte);else setError(data.error);});},[]);
-  function cambiarGranularidad(value:Granularidad){const now=new Date(),year=now.getFullYear(),month=String(now.getMonth()+1).padStart(2,"0"),day=String(now.getDate()).padStart(2,"0"),quarter=Math.floor(now.getMonth()/3)+1;const defaults={dia:[`${year}-${month}-${day}`,`${year-1}-${month}-${day}`],mes:[`${year}-${month}`,`${year-1}-${month}`],trimestre:[`${year}-T${quarter}`,`${year-1}-T${quarter}`],anio:[String(year),String(year-1)]}[value];setGranularidad(value);setPeriodo(defaults[0]);setComparar(defaults[1]);}
+
+  async function generar(selected=tipo){
+    setLoading(true); setError(""); setTipo(selected);
+    try {
+      const response=await fetch(url(selected));
+      const data=await response.json();
+      if(response.ok)setReporte(data.reporte);else setError(data.error);
+    } catch {
+      setError("No se pudo conectar con el generador de reportes");
+    } finally { setLoading(false); }
+  }
+
+  useEffect(()=>{
+    fetch("/api/reportes").then(response=>response.json()).then(data=>{if(data.reportes?.length)setOpcionesReportes(data.reportes);}).catch(()=>setOpcionesReportes(opcionesReportesIniciales));
+    const year=currentYear();
+    fetch(`/api/reportes/flujo-efectivo?granularidad=anio&periodo=${year}&comparar=${year-1}`)
+      .then(response=>response.json().then(data=>({ok:response.ok,data})))
+      .then(({ok,data})=>{if(ok)setReporte(data.reporte);else setError(data.error);})
+      .catch(()=>setError("No se pudo conectar con el generador de reportes"))
+      .finally(()=>setLoading(false));
+  },[]);
+
+  function cambiarGranularidad(value:Granularidad){
+    const now=new Date(),year=now.getFullYear(),month=String(now.getMonth()+1).padStart(2,"0"),day=String(now.getDate()).padStart(2,"0"),quarter=Math.floor(now.getMonth()/3)+1;
+    const defaults={dia:[`${year}-${month}-${day}`,`${year-1}-${month}-${day}`],mes:[`${year}-${month}`,`${year-1}-${month}`],trimestre:[`${year}-T${quarter}`,`${year-1}-T${quarter}`],anio:[String(year),String(year-1)]}[value];
+    setGranularidad(value);setPeriodo(defaults[0]);setComparar(defaults[1]);
+  }
   const descargar=()=>{window.location.href=url(tipo,"csv");};
-  return <><div className="pageHead reportPageHead"><div><span className="eyebrow">ESTADOS FINANCIEROS</span><h1>Centro de reportes</h1><p>Compare períodos con una experiencia temporal clara y flexible.</p></div></div><section className="timelineSlicer panel"><div className="slicerTop"><div><span className="slicerIcon"><MenuIcon name="reports"/></span><div><b>Comparación temporal</b><small>Elija el nivel de detalle y los períodos a analizar</small></div></div><div className="granularity" role="group" aria-label="Nivel de detalle temporal">{(["dia","mes","trimestre","anio"] as Granularidad[]).map(item=><button key={item} className={granularidad===item?"active":""} onClick={()=>cambiarGranularidad(item)}>{item==="dia"?"Día":item==="mes"?"Mes":item==="trimestre"?"Trimestre":"Año"}</button>)}</div></div><div className="periodCompare"><PeriodoControl label="Período principal" value={periodo} onChange={setPeriodo} granularidad={granularidad}/><div className="compareArrow"><span>VS</span><i>→</i></div><PeriodoControl label="Comparar contra" value={comparar} onChange={setComparar} granularidad={granularidad}/><button className="primary compareButton" onClick={()=>generar()} disabled={loading}>{loading?"Actualizando…":"Aplicar comparación"}</button></div><div className="timelineTrack"><span/><i/><i/><i/><b/></div></section>{reporte?<div className="sourceBanner"><b>Fuente real</b><span>{reporte.fuente}</span></div>:null}<section className="reportLayout"><aside className="reportCatalog">{opcionesReportes.map(item=><button key={item.tipo} className={tipo===item.tipo?"selected":""} onClick={()=>generar(item.tipo)}><span><MenuIcon name={item.icono}/></span><div><b>{item.titulo}</b><small>{item.descripcion}</small></div></button>)}</aside><section className="panel reportViewer">{error?<div className="emptyReport">{error}. Importe la balanza del período para generar este reporte.</div>:reporte?<><div className="reportTitle"><div><span className="status done">{reporte.fuente}</span><h2>{reporte.titulo}</h2><p>{reporte.periodoEtiqueta??reporte.periodo}{reporte.periodoComparativo?` frente a ${reporte.comparativoEtiqueta??reporte.periodoComparativo}`:""} · Córdobas NIO</p></div>{canDownload?<button className="secondary" onClick={descargar}>Descargar CSV</button>:null}</div><div className="tableWrap"><table className="financialTable"><thead><tr>{reporte.columnas.map(col=><th key={col}>{col}</th>)}</tr></thead><tbody>{reporte.filas.map((fila,index)=><tr key={`${fila.concepto}-${index}`} className={fila.esTotal?"totalRow":""}><td>{fila.codigo?<small>{fila.codigo}</small>:null}<b>{fila.concepto}</b></td><td className="amount">{dinero.format(fila.actual)}</td>{reporte.columnas.length>2?<td className="amount">{dinero.format(fila.anterior??0)}</td>:null}{reporte.columnas.length>3?<td className={(fila.variacion??0)<0?"amount negative":"amount positive"}>{dinero.format(fila.variacion??0)}</td>:null}</tr>)}</tbody></table></div><footer><span>Generado: {new Date(reporte.generadoEn).toLocaleString("es-NI")}</span><span>{reporte.filas.length} líneas</span></footer></>:<div className="emptyReport">Seleccione un reporte para generarlo.</div>}</section></section></>;
+
+  return <><div className="pageHead reportPageHead"><div><span className="eyebrow">ESTADOS FINANCIEROS</span><h1>Centro de reportes</h1><p>Compare períodos con una experiencia temporal clara y flexible.</p></div></div><section className="timelineSlicer panel"><div className="slicerTop"><div><span className="slicerIcon"><MenuIcon name="reports"/></span><div><b>Comparación temporal</b><small>Elija el nivel de detalle y los períodos a analizar</small></div></div><div className="granularity" role="group" aria-label="Nivel de detalle temporal">{(["dia","mes","trimestre","anio"] as Granularidad[]).map(item=><button key={item} className={granularidad===item?"active":""} onClick={()=>cambiarGranularidad(item)}>{item==="dia"?"Día":item==="mes"?"Mes":item==="trimestre"?"Trimestre":"Año"}</button>)}</div></div><div className="periodCompare"><PeriodoControl label="Período principal" value={periodo} onChange={setPeriodo} granularidad={granularidad}/><div className="compareArrow"><span>VS</span><i>→</i></div><PeriodoControl label="Comparar contra" value={comparar} onChange={setComparar} granularidad={granularidad}/><button className="primary compareButton" onClick={()=>generar()} disabled={loading}>{loading?"Actualizando…":"Aplicar comparación"}</button></div><div className="timelineTrack"><span/><i/><i/><i/><b/></div></section>{reporte?<div className="sourceBanner"><b>Fuente real</b><span>{reporte.fuente}</span></div>:null}<section className="reportLayout"><aside className="reportCatalog">{opcionesReportes.map(item=><button key={item.tipo} className={tipo===item.tipo?"selected":""} onClick={()=>generar(item.tipo)} disabled={loading}><span><MenuIcon name={item.icono}/></span><div><b>{item.titulo}</b><small>{item.descripcion}</small></div></button>)}</aside><section className="panel reportViewer">{loading?<div className="reportLoadingOverlay" role="status" aria-live="polite"><span className="spinner" aria-hidden="true"/><span className="loadingText">GENERANDO REPORTE</span><small>Consultando y consolidando datos contables...</small></div>:error?<div className="emptyReport">{error}. Importe la balanza del período para generar este reporte.</div>:reporte?<><div className="reportTitle"><div><span className="status done">{reporte.fuente}</span><h2>{reporte.titulo}</h2><p>{reporte.periodoEtiqueta??reporte.periodo}{reporte.periodoComparativo?` frente a ${reporte.comparativoEtiqueta??reporte.periodoComparativo}`:""} · Córdobas NIO</p></div><div className="reportActions"><button className="secondary" onClick={()=>window.print()}>Imprimir</button>{canDownload?<button className="secondary" onClick={descargar}>Descargar CSV</button>:null}</div></div><div className="tableWrap"><table className="financialTable"><thead><tr>{reporte.columnas.map(col=><th key={col}>{col}</th>)}</tr></thead><tbody>{reporte.filas.map((fila,index)=><tr key={`${fila.concepto}-${index}`} className={fila.esTotal?"totalRow":""}><td>{fila.codigo?<small>{fila.codigo}</small>:null}<b>{fila.concepto}</b></td><td className="amount">{dinero.format(fila.actual)}</td>{reporte.columnas.length>2?<td className="amount">{dinero.format(fila.anterior??0)}</td>:null}{reporte.columnas.length>3?<td className={(fila.variacion??0)<0?"amount negative":"amount positive"}>{dinero.format(fila.variacion??0)}</td>:null}</tr>)}</tbody></table></div><footer><span>Generado: {new Date(reporte.generadoEn).toLocaleString("es-NI")}</span><span>{reporte.filas.length} líneas</span></footer></>:<div className="emptyReport">Seleccione un reporte para generarlo.</div>}</section></section></>;
 }
 
 function PeriodoControl({label,value,onChange,granularidad}:{label:string;value:string;onChange:(value:string)=>void;granularidad:Granularidad}){

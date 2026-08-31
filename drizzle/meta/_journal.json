@@ -99,6 +99,27 @@
       "when": 1788041400000,
       "tag": "0013_configuracion_reportes",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788042600000,
+      "tag": "0014_reparar_reportes_bancarios",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788043800000,
+      "tag": "0015_actualizar_iglesias_cuentas_bancarias",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788045000000,
+      "tag": "0016_eliminar_iglesias_inactivas",
+      "breakpoints": true
     }
   ]
 }

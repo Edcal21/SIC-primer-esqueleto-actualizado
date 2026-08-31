@@ -69,10 +69,24 @@ export const iglesias = pgTable("iglesias", {
   check("ck_iglesias_estado", sql`${table.estado} in ('activa', 'inactiva')`),
 ]);
 
+export const cuentasBancarias = pgTable("cuentas_bancarias", {
+  numeroCuenta: varchar("numero_cuenta", { length: 32 }).primaryKey().notNull(),
+  nombre: text("nombre").notNull(),
+  moneda: varchar("moneda", { length: 3, enum: ["USD", "NIO"] }).notNull(),
+  estado: varchar("estado", { length: 8, enum: ["activa", "inactiva"] }).notNull().default("activa"),
+}, (table) => [
+  index("idx_cuentas_bancarias_nombre").on(table.nombre),
+  index("idx_cuentas_bancarias_estado").on(table.estado),
+  check("ck_cuentas_bancarias_numero", sql`length(trim(${table.numeroCuenta})) > 0`),
+  check("ck_cuentas_bancarias_moneda", sql`${table.moneda} in ('USD', 'NIO')`),
+  check("ck_cuentas_bancarias_estado", sql`${table.estado} in ('activa', 'inactiva')`),
+]);
+
 export const movimientosCuentas = pgTable("movimientos_cuentas", {
   id: uuid("id").primaryKey().defaultRandom(),
   fecha: date("fecha").notNull(),
   iglesiaCodigo: varchar("iglesia_codigo", { length: 8 }).references(() => iglesias.codigo),
+  cuentaBancariaNumero: varchar("cuenta_bancaria_numero", { length: 32 }).references(() => cuentasBancarias.numeroCuenta),
   referencia: varchar("referencia", { length: 120 }),
   concepto: text("concepto").notNull(),
   estado: varchar("estado", { length: 12, enum: ["registrado", "anulado"] }).notNull().default("registrado"),
@@ -81,6 +95,7 @@ export const movimientosCuentas = pgTable("movimientos_cuentas", {
 }, (table) => [
   index("idx_movimientos_cuentas_fecha").on(table.fecha),
   index("idx_movimientos_cuentas_iglesia").on(table.iglesiaCodigo),
+  index("idx_movimientos_cuentas_cuenta_bancaria").on(table.cuentaBancariaNumero),
   index("idx_movimientos_cuentas_referencia").on(table.referencia),
   index("idx_movimientos_cuentas_estado").on(table.estado),
   check("ck_movimientos_cuentas_estado", sql`${table.estado} in ('registrado', 'anulado')`),

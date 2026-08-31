@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { detallesMovimientos, iglesias, movimientosCuentas } from "../../../db/schema";
+import { cuentasBancarias, detallesMovimientos, iglesias, movimientosCuentas } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 
@@ -14,6 +14,7 @@ type DetallePayload = {
 type MovimientoPayload = {
   fecha?: string;
   iglesiaCodigo?: string;
+  cuentaBancariaNumero?: string;
   referencia?: string;
   concepto?: string;
   detalles?: DetallePayload[];
@@ -46,12 +47,14 @@ export async function POST(request: Request) {
 
   const fecha = body.fecha?.trim();
   const iglesiaCodigo = body.iglesiaCodigo?.trim();
+  const cuentaBancariaNumero = body.cuentaBancariaNumero?.trim();
   const referencia = body.referencia?.trim() || null;
   const concepto = body.concepto?.trim();
   const detalles = body.detalles ?? [];
 
   if (!fecha || !fechaRegex.test(fecha)) return jsonError("Fecha inválida", 400);
   if (!iglesiaCodigo) return jsonError("La iglesia es obligatoria", 400);
+  if (!cuentaBancariaNumero) return jsonError("La cuenta bancaria es obligatoria", 400);
   if (!concepto) return jsonError("Concepto es obligatorio", 400);
   if (detalles.length < 2) return jsonError("Debe agregar al menos dos detalles para cumplir partida doble", 400);
 
@@ -78,11 +81,15 @@ export async function POST(request: Request) {
     const [iglesia] = await db.select({ codigo: iglesias.codigo }).from(iglesias)
       .where(and(eq(iglesias.codigo, iglesiaCodigo), eq(iglesias.estado, "activa"))).limit(1);
     if (!iglesia) return jsonError("La iglesia seleccionada no existe o está inactiva", 400);
+    const [cuentaBancaria] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta }).from(cuentasBancarias)
+      .where(and(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa"))).limit(1);
+    if (!cuentaBancaria) return jsonError("La cuenta bancaria seleccionada no existe o está inactiva", 400);
 
     const result = await db.transaction(async tx => {
       const [movimiento] = await tx.insert(movimientosCuentas).values({
         fecha,
         iglesiaCodigo,
+        cuentaBancariaNumero,
         referencia,
         concepto,
         creadoPor: user.id,
@@ -104,7 +111,7 @@ export async function POST(request: Request) {
         accion: "Registró movimiento contable",
         entidad: "movimientos_cuentas",
         entidadId: movimiento.id,
-        detalle: `${fecha} · Iglesia ${iglesiaCodigo} · ${concepto}`,
+        detalle: `${fecha} · Iglesia ${iglesiaCodigo} · Cuenta bancaria ${cuentaBancariaNumero} · ${concepto}`,
       });
 
       return { movimiento, detalles: detallesCreados };
