@@ -1,6 +1,6 @@
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import type { getDb } from "../db";
-import { importacionesBalanza, lineasBalanza } from "../db/schema";
+import { importacionesBalanza, lineasBalanza, reportesCatalogo } from "../db/schema";
 
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
@@ -19,6 +19,20 @@ export const catalogoReportes: { tipo: TipoReporte; titulo: string; descripcion:
 ];
 
 export function esTipoReporte(value:string): value is TipoReporte { return catalogoReportes.some(item=>item.tipo===value); }
+
+export async function obtenerCatalogoReportes(db: Db) {
+  try {
+    const rows = await db.select({
+      tipo: reportesCatalogo.tipo,
+      titulo: reportesCatalogo.titulo,
+      descripcion: reportesCatalogo.descripcion,
+      icono: reportesCatalogo.icono,
+    }).from(reportesCatalogo).where(eq(reportesCatalogo.estado, "activo")).orderBy(asc(reportesCatalogo.orden));
+    return rows.length ? rows.map(row => ({ ...row, tipo: row.tipo as TipoReporte })) : catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry"][index] ?? "reports" }));
+  } catch {
+    return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry"][index] ?? "reports" }));
+  }
+}
 
 function datosPeriodo(granularidad:Granularidad, periodo:string){
   const anio=Number(periodo.slice(0,4)); if(!Number.isInteger(anio) || anio < 2000 || anio > 2100)throw new Error("Período inválido");

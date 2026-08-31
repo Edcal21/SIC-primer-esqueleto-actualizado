@@ -92,6 +92,13 @@
       "when": 1788040200000,
       "tag": "0012_normalizar_nombres_iglesias",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788041400000,
+      "tag": "0013_configuracion_reportes",
+      "breakpoints": true
     }
   ]
 }

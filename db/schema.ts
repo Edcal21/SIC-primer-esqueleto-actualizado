@@ -12,6 +12,29 @@ export const permisos = pgTable("permisos", {
   descripcion: text("descripcion").notNull(),
 });
 
+export const configuracionSistema = pgTable("configuracion_sistema", {
+  clave: varchar("clave", { length: 80 }).primaryKey().notNull(),
+  valor: text("valor").notNull(),
+  descripcion: text("descripcion"),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_configuracion_sistema_clave").on(table.clave),
+]);
+
+export const reportesCatalogo = pgTable("reportes_catalogo", {
+  tipo: varchar("tipo", { length: 40 }).primaryKey().notNull(),
+  titulo: text("titulo").notNull(),
+  descripcion: text("descripcion").notNull(),
+  icono: varchar("icono", { length: 30 }).notNull().default("reports"),
+  orden: integer("orden").notNull().default(1),
+  estado: varchar("estado", { length: 8, enum: ["activo", "inactivo"] }).notNull().default("activo"),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_reportes_catalogo_orden").on(table.orden),
+  index("idx_reportes_catalogo_estado").on(table.estado),
+  check("ck_reportes_catalogo_estado", sql`${table.estado} in ('activo', 'inactivo')`),
+]);
+
 export const rolesPermisos = pgTable("roles_permisos", {
   rolId: varchar("rol_id", { length: 40 }).notNull().references(() => roles.id),
   permisoId: varchar("permiso_id", { length: 80 }).notNull().references(() => permisos.id),
