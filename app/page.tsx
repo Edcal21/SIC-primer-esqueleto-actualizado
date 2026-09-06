@@ -124,7 +124,7 @@ function Sidebar({ user, active, allowedMenu, setActive, logout, config }: { use
   return <aside className="sidebar"><div className="brand"><span className="brandMark logoMark" style={{ backgroundImage: `url(${config.logoLogin})` }} role="img" aria-label={config.institucionNombre}/><div><b>{config.sistemaNombre}</b><small>{config.institucionNombre}</small></div></div><nav aria-label="Navegación principal">{menuGroups.map(group=>{const items=allowedMenu.filter(item=>group.items.includes(item.nombre));return items.length?<section className="navSection" key={group.label}><p className="navLabel">{group.label}</p>{items.map(item=><button key={item.nombre} className={active===item.nombre?"navItem active":"navItem"} onClick={()=>setActive(item.nombre)}><MenuIcon name={item.icono}/><span>{item.nombre}</span></button>)}</section>:null;})}</nav><div className="sidebarFoot"><span className="avatar">{user.nombre.split(" ").map(word=>word[0]).slice(0,2).join("")}</span><div><b>{user.nombre}</b><small>{nombresRol[user.rol]}</small></div><button aria-label="Cerrar sesión" onClick={logout}>Salir</button></div></aside>;
 }
 
-function MenuIcon({ name }: { name: string }) {
+function MenuIcon({ name, className = "navIcon" }: { name: string; className?: string }) {
   const paths: Record<string, string> = {
     dashboard: "M4 13h6V4H4v9Zm10 7h6V4h-6v16ZM4 20h6v-4H4v4Zm10 0h6v-4h-6v4Z",
     users: "M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3ZM8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13Zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5C23 14.17 18.33 13 16 13Z",
@@ -134,8 +134,12 @@ function MenuIcon({ name }: { name: string }) {
     upload: "M11 16h2V8l3.5 3.5 1.42-1.42L12 4.16 6.08 10.08 7.5 11.5 11 8v8Zm-5 2h12v2H6v-2Z",
     reports: "M5 3h14v18H5V3Zm3 4v2h8V7H8Zm0 4v2h8v-2H8Zm0 4v2h5v-2H8Z",
     audit: "M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7Z",
+    search: "M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5Zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14Z",
+    trash: "M9 3h6l1 2h4v2H4V5h4l1-2ZM6 9h12l-1.1 11.2A2 2 0 0 1 14.9 22H9.1a2 2 0 0 1-2-1.8L6 9Zm4 2v8h1.5v-8H10Zm2.5 0v8H14v-8h-1.5Z",
+    info: "M11 7h2v2h-2V7Zm0 4h2v6h-2v-6Zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z",
+    check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z",
   };
-  return <svg className="navIcon" viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name] ?? paths.dashboard}/></svg>;
+  return <svg className={className} viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name] ?? paths.dashboard}/></svg>;
 }
 
 function Login({ onSubmit, error, config }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; error: string; config: ConfiguracionSistema }) {
@@ -167,14 +171,18 @@ function Resumen({ user, setActive }: { user: User; setActive: (value: string) =
   return <><div className="pageHead"><div><span className="eyebrow">{nombresRol[user.rol].toUpperCase()}</span><h1>Resumen operativo</h1><p>Estado actual de catálogos, cargas, movimientos y trazabilidad.</p></div></div>{error?<div className="authError">{error}</div>:null}<section className="metrics workflowMetrics"><article className="metric featured"><p>Rol activo</p><strong>{nombresRol[user.rol]}</strong><span className="pill ready">Sesión válida</span></article><article className="metric"><p>Cuentas contables</p><strong>{resumen?.cuentas ?? "..."}</strong><small>{resumen?.cuentasMovimiento ?? 0} disponibles para minutas</small></article><article className="metric"><p>Iglesias activas</p><strong>{resumen?.iglesiasActivas ?? "..."}</strong><small>Catálogo institucional</small></article><article className="metric"><p>Minutas registradas</p><strong>{resumen?.movimientos ?? "..."}</strong><small>{resumen?.ultimoMovimiento ? `Última: ${new Date(resumen.ultimoMovimiento.creadoEn).toLocaleDateString("es-NI")}` : "Sin registros"}</small></article></section><section className="grid"><article className="panel activityPanel"><div className="panelHead"><div><h2>Flujo contable</h2><p>Datos conectados a PostgreSQL</p></div></div><div className="statusList"><button onClick={()=>setActive("Importaciones")}><b>Balanzas importadas</b><span>{resumen?.importaciones ?? 0}</span></button><button onClick={()=>setActive("Bancos")}><b>Reportes bancarios</b><span>{resumen?.reportesBanco ?? 0}</span></button><button onClick={()=>setActive("Auditoría")}><b>Eventos auditados</b><span>{resumen?.eventosAuditoria ?? 0}</span></button></div></article><article className="panel activityPanel"><div className="panelHead"><div><h2>Actividad reciente</h2><p>Últimos eventos del sistema</p></div></div>{resumen?.eventos.length ? <div className="auditMini">{resumen.eventos.map(evento=><div key={`${evento.fecha}-${evento.accion}`}><b>{evento.modulo}</b><span>{evento.accion}</span><small>{evento.usuario} · {new Date(evento.fecha).toLocaleString("es-NI")}</small></div>)}</div> : <div className="emptySmall">Sin actividad registrada.</div>}</article></section><section className="panel shortcutPanel"><div className="panelHead"><div><h2>Accesos de trabajo</h2><p>Módulos habilitados para este usuario</p></div></div><div className="shortcutGrid">{accesos.map(item=><button key={item.nombre} onClick={()=>setActive(item.nombre)}><MenuIcon name={item.icono}/><b>{item.nombre}</b><small>{etiquetasPermiso[item.permiso]}</small></button>)}</div></section></>;
 }
 
+const detallesIniciales = (): DetalleMinuta[] => [{ tipo: "debito", cuentaCodigo: "", monto: "" }, { tipo: "credito", cuentaCodigo: "", monto: "" }];
+
 function Movimiento({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [cuentas, setCuentas] = useState<CuentaMovimiento[]>([]);
-  const [detalles, setDetalles] = useState<DetalleMinuta[]>([{ tipo: "debito", cuentaCodigo: "", monto: "" }, { tipo: "credito", cuentaCodigo: "", monto: "" }]);
+  const [detalles, setDetalles] = useState<DetalleMinuta[]>(detallesIniciales);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [iglesias, setIglesias] = useState<Iglesia[]>([]);
   const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const buscarCuenta = (codigo: string) => cuentas.find(cuenta => cuenta.codigo === codigo.trim());
 
   useEffect(() => {
     fetch("/api/iglesias")
@@ -207,15 +215,23 @@ function Movimiento({ notify, requestConfirmation }: { notify: (message: string)
       .catch(cause => setError(cause instanceof Error ? cause.message : "No se pudo cargar el catálogo de cuentas bancarias"));
   }, []);
 
+  function limpiarFormulario() {
+    formRef.current?.reset();
+    setDetalles(detallesIniciales());
+    setError("");
+  }
+
   async function guardar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+    const form = new FormData(event.currentTarget);
     const detallesPayload = detalles.map((detalle, index) => {
-      const cuenta = cuentas.find(item => item.codigo === detalle.cuentaCodigo);
+      const cuenta = buscarCuenta(detalle.cuentaCodigo);
       return { tipo: detalle.tipo, cuentaCodigo: cuenta?.codigo, cuentaNombre: cuenta?.descripcion, monto: detalle.monto, orden: index + 1 };
     });
+    if (detalles.some(detalle => detalle.cuentaCodigo.trim() && !buscarCuenta(detalle.cuentaCodigo))) {
+      return setError("Hay líneas con un código que no pertenece al catálogo de cuentas de movimiento");
+    }
     if (detallesPayload.some(detalle => !detalle.cuentaCodigo || !detalle.monto)) {
       return setError("Complete cuenta y monto en todas las líneas");
     }
@@ -247,8 +263,7 @@ function Movimiento({ notify, requestConfirmation }: { notify: (message: string)
           });
           const result = await response.json();
           if (!response.ok) return setError(result.error ?? "No se pudo guardar el movimiento");
-          formElement.reset();
-          setDetalles([{ tipo: "debito", cuentaCodigo: "", monto: "" }, { tipo: "credito", cuentaCodigo: "", monto: "" }]);
+          limpiarFormulario();
           notify("Movimiento registrado y auditado correctamente");
         } finally { setSaving(false); }
       },
@@ -260,9 +275,68 @@ function Movimiento({ notify, requestConfirmation }: { notify: (message: string)
   const diferencia = totalDebitos - totalCreditos;
   const updateDetalle = (index: number, changes: Partial<DetalleMinuta>) => setDetalles(current => current.map((detalle, itemIndex) => itemIndex === index ? { ...detalle, ...changes } : detalle));
   const removeDetalle = (index: number) => setDetalles(current => current.length > 2 ? current.filter((_, itemIndex) => itemIndex !== index) : current);
+  const agregarDetalle = () => setDetalles(current => [...current, { tipo: "debito", cuentaCodigo: "", monto: "" }]);
+  const codigosInvalidos = detalles.some(detalle => detalle.cuentaCodigo.trim() && !buscarCuenta(detalle.cuentaCodigo));
 
   const isBalanced = Math.abs(diferencia) < 0.01 && totalDebitos > 0 && totalCreditos > 0;
-  return <><div className="pageHead movementHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre una minuta cuadrada usando iglesias, cuentas bancarias y cuentas contables activas.</p></div><div className={isBalanced?"balanceSummary balanced":"balanceSummary pending"}><span>Débitos <b>{dinero.format(totalDebitos)}</b></span><span>Créditos <b>{dinero.format(totalCreditos)}</b></span><span className={isBalanced?"positive":"negative"}>Diferencia <b>{isBalanced?"Cuadrado":dinero.format(diferencia)}</b></span></div></div>{!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}<form className="panel formPanel movementPanel" onSubmit={guardar}><div className="formGrid movementMeta"><label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label><label>Cuenta bancaria<select name="cuentaBancariaNumero" required defaultValue="" disabled={!cuentasBancarias.length}><option value="" disabled>{cuentasBancarias.length ? "Seleccione una cuenta bancaria" : "Cargando cuentas bancarias..."}</option>{cuentasBancarias.map(cuenta=><option key={cuenta.numeroCuenta} value={cuenta.numeroCuenta}>{cuenta.nombre} · {cuenta.numeroCuenta} · {cuenta.moneda}</option>)}</select></label><label className="wide">Iglesia<select name="iglesiaCodigo" required defaultValue="" disabled={!iglesias.length}><option value="" disabled>{iglesias.length ? "Seleccione una iglesia" : "Cargando iglesias..."}</option>{iglesias.map(iglesia=><option key={iglesia.codigo} value={iglesia.codigo}>{iglesia.codigo} · {iglesia.nombre}</option>)}</select></label><label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label><label className="wide">Concepto<textarea name="concepto" required/></label></div><div className="detailEditor"><div className="detailHeader"><b>Detalle contable</b><button className="secondary" type="button" onClick={()=>setDetalles(current=>[...current,{tipo:"debito",cuentaCodigo:"",monto:""}])}>Agregar línea</button></div><div className="detailTableHead"><span>Tipo</span><span>Cuenta contable</span><span>Monto NIO</span><span/></div>{detalles.map((detalle,index)=><div className="detailRow" key={index}><select className={detalle.tipo} value={detalle.tipo} onChange={event=>updateDetalle(index,{tipo:event.target.value as DetalleMinuta["tipo"]})}><option value="debito">Débito</option><option value="credito">Crédito</option></select><select value={detalle.cuentaCodigo} onChange={event=>updateDetalle(index,{cuentaCodigo:event.target.value})} required disabled={loading || !cuentas.length}><option value="">{loading ? "Cargando catálogo..." : "Seleccione cuenta"}</option>{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.codigo} · {cuenta.descripcion}</option>)}</select><input value={detalle.monto} onChange={event=>updateDetalle(index,{monto:event.target.value})} type="number" required min="0.01" step="0.01" placeholder="0.00"/><button className="secondary iconButton" type="button" onClick={()=>removeDetalle(index)} disabled={detalles.length<=2} aria-label="Eliminar línea">×</button></div>)}</div>{cuentas.length ? <div className="accountHint">{cuentas.length} cuentas de movimiento, {iglesias.length} iglesias y {cuentasBancarias.length} cuentas bancarias disponibles desde PostgreSQL.</div> : null}{error?<div className="authError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving || loading || !cuentas.length || !iglesias.length || !cuentasBancarias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button></div></form></>;
+  return <>
+    <div className="pageHead movementHead">
+      <div><span className="eyebrow">CONTABILIDAD</span><h1>Registrar movimiento</h1><p>Registre una minuta cuadrada usando iglesias, cuentas bancarias y cuentas contables activas.</p></div>
+      <div className={isBalanced?"balanceSummary balanced":"balanceSummary pending"}>
+        <div className="balanceFigures">
+          <span>Débitos<b>{dinero.format(totalDebitos)}</b></span>
+          <span>Créditos<b>{dinero.format(totalCreditos)}</b></span>
+        </div>
+        <div className="balanceStatus">
+          <span className={isBalanced?"status done":"status pending"}><MenuIcon name={isBalanced?"check":"info"} className="glyphIcon"/>{isBalanced?"Cuadrado":"Sin cuadrar"}</span>
+          <small>Diferencia {dinero.format(diferencia)}</small>
+        </div>
+      </div>
+    </div>
+    {!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}
+    <form className="panel formPanel movementPanel" ref={formRef} onSubmit={guardar}>
+      <section className="movementMeta">
+        <div className="sectionHead"><b>Información general</b><small>Identificación de la minuta contable</small></div>
+        <div className="formGrid">
+          <label>Fecha<input name="fecha" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")}/></label>
+          <label>Cuenta bancaria<select name="cuentaBancariaNumero" required defaultValue="" disabled={!cuentasBancarias.length}><option value="" disabled>{cuentasBancarias.length ? "Seleccione una cuenta bancaria" : "Cargando cuentas bancarias..."}</option>{cuentasBancarias.map(cuenta=><option key={cuenta.numeroCuenta} value={cuenta.numeroCuenta}>{cuenta.nombre} · {cuenta.numeroCuenta} · {cuenta.moneda}</option>)}</select></label>
+          <label className="wide">Iglesia<select name="iglesiaCodigo" required defaultValue="" disabled={!iglesias.length}><option value="" disabled>{iglesias.length ? "Seleccione una iglesia" : "Cargando iglesias..."}</option>{iglesias.map(iglesia=><option key={iglesia.codigo} value={iglesia.codigo}>{iglesia.codigo} · {iglesia.nombre}</option>)}</select></label>
+          <label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label>
+          <label className="wide">Concepto<textarea name="concepto" required/></label>
+        </div>
+      </section>
+      <div className="detailEditor">
+        <div className="detailHeader">
+          <div><b>Líneas de detalle</b><small>{detalles.length} líneas registradas · montos en córdobas</small></div>
+          <button className="secondary" type="button" onClick={agregarDetalle}><MenuIcon name="entry" className="glyphIcon"/>Agregar línea</button>
+        </div>
+        <div className="detailTableHead"><span>Tipo</span><span>Cuenta contable</span><span>Monto NIO</span><span/></div>
+        {detalles.map((detalle,index)=>{
+          const cuenta = buscarCuenta(detalle.cuentaCodigo);
+          const codigoEscrito = Boolean(detalle.cuentaCodigo.trim());
+          return <div className="detailRow" key={index}>
+            <select className={detalle.tipo} value={detalle.tipo} onChange={event=>updateDetalle(index,{tipo:event.target.value as DetalleMinuta["tipo"]})} aria-label={`Tipo de la línea ${index+1}`}><option value="debito">Débito</option><option value="credito">Crédito</option></select>
+            <div className="accountCell">
+              <span className="accountSearchIcon"><MenuIcon name="search" className="glyphIcon"/></span>
+              <input list="cuentasMovimiento" value={detalle.cuentaCodigo} onChange={event=>updateDetalle(index,{cuentaCodigo:event.target.value})} required disabled={loading || !cuentas.length} placeholder={loading?"Cargando catálogo...":"Buscar cuenta por código"} aria-label={`Cuenta contable de la línea ${index+1}`}/>
+              <small className={codigoEscrito && !cuenta ? "accountName invalid" : "accountName"}>{cuenta ? cuenta.descripcion : codigoEscrito ? "Código fuera del catálogo de cuentas de movimiento" : "Escriba el código o elíjalo del catálogo"}</small>
+            </div>
+            <input value={detalle.monto} onChange={event=>updateDetalle(index,{monto:event.target.value})} type="number" required min="0.01" step="0.01" placeholder="0.00" aria-label={`Monto de la línea ${index+1}`}/>
+            <button className="secondary iconButton" type="button" onClick={()=>removeDetalle(index)} disabled={detalles.length<=2} aria-label={`Eliminar la línea ${index+1}`}><MenuIcon name="trash" className="glyphIcon"/></button>
+          </div>;
+        })}
+        <datalist id="cuentasMovimiento">{cuentas.map(cuenta=><option key={cuenta.codigo} value={cuenta.codigo}>{cuenta.descripcion}</option>)}</datalist>
+      </div>
+      {error?<div className="authError">{error}</div>:null}
+      <div className="movementFoot">
+        {cuentas.length ? <div className="accountHint"><MenuIcon name="info" className="glyphIcon"/><span>{cuentas.length} cuentas de movimiento, {iglesias.length} iglesias y {cuentasBancarias.length} cuentas bancarias disponibles desde PostgreSQL.</span></div> : <span/>}
+        <div className="formActions">
+          <button className="secondary" type="button" onClick={limpiarFormulario} disabled={saving}>Limpiar formulario</button>
+          <button className="primary" type="submit" disabled={saving || loading || codigosInvalidos || !cuentas.length || !iglesias.length || !cuentasBancarias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button>
+        </div>
+      </div>
+    </form>
+  </>;
 }
 
 function CatalogoContable({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
