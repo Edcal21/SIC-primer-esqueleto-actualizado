@@ -1,6 +1,6 @@
 # Auditoria frontend vs backend
 
-Estado revisado: 2026-08-31.
+Estado revisado: 2026-09-06.
 
 ## Conectado a PostgreSQL
 
@@ -10,10 +10,14 @@ Estado revisado: 2026-08-31.
 - Movimientos contables y detalle debito/credito.
 - Importaciones de balanza de comprobacion.
 - Reportes financieros generados desde balanzas importadas.
-- Reportes bancarios cargados por el usuario banco.
-- Auditoria de acciones relevantes.
+- Estados de cuenta bancarios: el contenido del archivo se interpreta y cada movimiento se guarda en
+  `lineas_reporte_bancario`, con cuenta bancaria, periodo y totales en `reportes_bancarios`.
+- Conciliacion bancaria: enlace linea a linea contra minutas, descarte, aprobacion y rechazo en
+  `conciliaciones_bancarias`.
+- CRUD de cuentas bancarias.
+- Configuracion institucional editable desde la pantalla de administracion.
+- Auditoria de acciones relevantes, incluidas las de conciliacion y configuracion.
 - Resumen operativo del dashboard.
-- Configuracion institucional basica.
 - Catalogo visible de reportes.
 
 ## Estatico por regla de negocio
@@ -23,13 +27,30 @@ Estado revisado: 2026-08-31.
 - Naturaleza de cuentas: deudora y acreedora.
 - Clasificacion de flujo: operacion, inversion, financiamiento y no aplica.
 - Estados tecnicos de registros: activo, inactivo, procesado, error, registrado y anulado.
+- Moneda funcional del sistema: cordobas.
 
-Estas listas siguen fijas porque afectan validaciones, reportes y permisos. Convertirlas en libres desde UI podria romper reglas contables si no se hace con una capa adicional de administracion.
+Estas listas siguen fijas porque afectan validaciones, reportes y permisos. Convertirlas en libres desde UI
+podria romper reglas contables si no se hace con una capa adicional de administracion.
 
-## Siguiente conversion recomendada
+## Permisos y segregacion de funciones
 
-- CRUD completo de iglesias para administradores.
-- Configuracion editable desde pantalla de administracion.
-- Activar/desactivar reportes desde administracion.
-- Historial de cambios sobre configuracion institucional.
-- Parametros contables por periodo, como moneda funcional y cierre mensual.
+| Permiso | Quien lo usa | Que habilita |
+| --- | --- | --- |
+| `banco:cargar` | Operador bancario | Procesar estados de cuenta, generar conciliaciones y enlazar o descartar lineas. |
+| `conciliacion:aprobar` | Administrador | Aprobar o rechazar una conciliacion en borrador. |
+| `catalogo:administrar` | Contador y administrador segun asignacion | CRUD de cuentas contables y de cuentas bancarias. |
+| `configuracion:administrar` | Administrador | Editar la identidad institucional del sistema. |
+
+Quien carga y enlaza no aprueba: `banco:cargar` y `conciliacion:aprobar` se otorgan a roles distintos.
+La migracion `0017_conciliacion_bancaria` establece ese reparto inicial y los roles siguen siendo editables
+desde la pantalla de usuarios.
+
+## Pendiente de conversion
+
+- Pantalla de consulta y anulacion de minutas: `GET /api/movimientos` existe sin interfaz.
+- CRUD completo de iglesias para administradores; hoy se mantienen por migracion.
+- Activar o desactivar reportes desde administracion.
+- Historial de cambios sobre configuracion institucional; hoy solo queda la traza en auditoria.
+- Conversion de moneda para cuentas bancarias en dolares.
+- Retencion del archivo bancario original ademas de sus lineas interpretadas.
+- Parametros contables por periodo, como cierre mensual.

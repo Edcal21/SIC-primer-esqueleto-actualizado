@@ -2,16 +2,21 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver";
+type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
 type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
-type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string };
+type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string; cuentaBancariaNumero?: string | null; periodoInicio?: string | null; periodoFin?: string | null; totalLineas?: number; totalDebitos?: string; totalCreditos?: string; mensajeError?: string | null; conciliacionId?: string | null; conciliacionEstado?: string | null };
+type LineaBanco = { id: string; numeroLinea: number; fecha: string | null; referencia: string | null; descripcion: string; debito: string; credito: string; saldo: string | null; estadoConciliacion: "pendiente" | "conciliada" | "descartada"; movimientoId: string | null };
+type MovimientoConciliable = { id: string; fecha: string; referencia: string | null; concepto: string; monto: number; lineaId: string | null };
+type LineaConciliacion = LineaBanco & { movimiento: MovimientoConciliable | null };
+type Conciliacion = { id: string; reporteId: string; cuentaBancariaNumero: string; cuentaBancariaNombre?: string | null; periodo: string; estado: "borrador" | "aprobada" | "rechazada"; totalBanco: string; totalConciliado: string; totalPendiente: string; lineasConciliadas: number; lineasPendientes: number; movimientosSinConciliar: number; observaciones?: string | null; creadoEn: string; revisadoPorNombre?: string | null; revisadoEn?: string | null; reporteNombre?: string | null };
+type ReporteDisponible = { id: string; nombre: string; cuentaBancariaNumero: string | null; periodoInicio: string | null; periodoFin: string | null; totalLineas: number };
 type Evento = { fecha: string; usuario: string; accion: string; resultado: string; detalle?: string | null };
 type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; totalLineas: number; totalDebe: string; totalHaber: string; creadoEn: string };
 type PermisoAdmin = { id: Permiso; descripcion: string };
 type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
 type Iglesia = { codigo: string; nombre: string };
-type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO" };
+type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO"; estado?: "activa" | "inactiva" };
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
@@ -37,6 +42,7 @@ const etiquetasPermiso: Record<Permiso, string> = {
   "reportes:ver": "Ver reportes",
   "reportes:descargar": "Descargar reportes",
   "auditoria:ver": "Ver auditoría",
+  "configuracion:administrar": "Editar configuración",
 };
 const menu = [
   { nombre: "Resumen", permiso: "panel:ver" as Permiso, icono: "dashboard" },
@@ -44,14 +50,16 @@ const menu = [
   { nombre: "Registrar movimiento", permiso: "movimientos:escribir" as Permiso, icono: "entry" },
   { nombre: "Catálogo contable", permiso: "catalogo:administrar" as Permiso, icono: "catalog" },
   { nombre: "Bancos", permiso: "banco:ver" as Permiso, icono: "bank" },
+  { nombre: "Conciliación", permiso: "banco:ver" as Permiso, icono: "reconcile" },
   { nombre: "Importaciones", permiso: "importaciones:administrar" as Permiso, icono: "upload" },
   { nombre: "Reportes", permiso: "reportes:ver" as Permiso, icono: "reports" },
   { nombre: "Auditoría", permiso: "auditoria:ver" as Permiso, icono: "audit" },
+  { nombre: "Configuración", permiso: "configuracion:administrar" as Permiso, icono: "settings" },
 ];
 const menuGroups = [
-  { label: "Operativa", items: ["Resumen", "Registrar movimiento", "Bancos"] },
+  { label: "Operativa", items: ["Resumen", "Registrar movimiento", "Bancos", "Conciliación"] },
   { label: "Reportes", items: ["Importaciones", "Reportes"] },
-  { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Auditoría"] },
+  { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Auditoría", "Configuración"] },
 ];
 const defaultConfig: ConfiguracionSistema = { institucionNombre: "Universal Nicaragua", sistemaNombre: "SIC", sistemaDescripcion: "Sistema de Información Contable", moneda: "NIO", logoLogin: "/universal-nicaragua-login.png" };
 
@@ -104,7 +112,7 @@ export default function Home() {
 
   return <main className="shell">
     <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActive} logout={()=>requestConfirmation({ title: "Cerrar sesión segura", message: "Se cerrará la sesión actual y deberá autenticarse nuevamente para continuar.", confirmLabel: "Cerrar sesión", onConfirm: logout })} config={config}/>
-    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} notify={notify}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : <Modulo nombre={active} user={user}/>}</div></section>
+    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Conciliación" ? <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : active === "Configuración" ? <ConfiguracionInstitucional config={config} onSaved={setConfig} notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
     {notice ? <div className="toast" role="status" aria-live="polite"><span className="toastIcon" aria-hidden="true">✓</span><span>{notice}</span></div> : null}
     {modal ? <ConfirmModal modal={modal} busy={modalBusy} onCancel={()=>{ if (!modalBusy) setModal(null); }} onConfirm={confirmModal}/> : null}
   </main>;
@@ -138,6 +146,8 @@ function MenuIcon({ name, className = "navIcon" }: { name: string; className?: s
     trash: "M9 3h6l1 2h4v2H4V5h4l1-2ZM6 9h12l-1.1 11.2A2 2 0 0 1 14.9 22H9.1a2 2 0 0 1-2-1.8L6 9Zm4 2v8h1.5v-8H10Zm2.5 0v8H14v-8h-1.5Z",
     info: "M11 7h2v2h-2V7Zm0 4h2v6h-2v-6Zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z",
     check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z",
+    reconcile: "M9.01 14H2v2h7.01v3L13 15l-3.99-4v3Zm5.98-1v-3H22V8h-7.01V5L11 9l3.99 4Z",
+    settings: "M3 17v2h6v-2H3ZM3 5v2h10V5H3Zm10 16v-2h8v-2h-8v-2h-2v6h2ZM7 9v2H3v2h4v2h2V9H7Zm14 4v-2H11v2h10Zm-6-4h2V7h4V5h-4V3h-2v6Z",
   };
   return <svg className={className} viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name] ?? paths.dashboard}/></svg>;
 }
@@ -498,12 +508,16 @@ function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
   return <><div className="pageHead"><div><span className="eyebrow">ADMINISTRACIÓN</span><h1>Usuarios y roles</h1><p>Gestión inicial de accesos del sistema.</p></div></div><section className="adminLayout"><form className="panel formPanel" onSubmit={crearUsuario}><div className="panelHead compact"><div><h2>Crear usuario</h2><p>El usuario podrá iniciar sesión con el rol asignado.</p></div></div><div className="formGrid"><label>Usuario<input name="usuario" required placeholder="usuario.nuevo"/></label><label>Nombre<input name="nombre" required placeholder="Nombre completo"/></label><label>Rol<select name="rolId" required defaultValue=""><option value="" disabled>Seleccione rol</option>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></label><label>Contraseña inicial<input name="password" type="password" required minLength={8} placeholder="Mínimo 8 caracteres"/></label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear usuario"}</button></div></form><form className="panel formPanel" onSubmit={crearRol}><div className="panelHead compact"><div><h2>Crear rol</h2><p>Defina un perfil reutilizable para usuarios nuevos.</p></div></div><div className="formGrid"><label>Identificador<input name="id" required placeholder="nuevo_rol"/></label><label>Nombre<input name="nombre" required placeholder="Nuevo rol"/></label><label className="wide">Descripción<input name="descripcion" required placeholder="Responsabilidad principal del rol"/></label></div><div className="permissionGrid">{permisos.map(permiso=><label key={permiso.id}><input type="checkbox" name="permisos" value={permiso.id}/><span>{etiquetasPermiso[permiso.id]}</span><small>{permiso.descripcion}</small></label>)}</div><div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear rol"}</button></div></form></section><section className="panel rolesPanel roleMatrix"><div className="panelHead compact"><div><h2>Roles disponibles</h2><p>{roles.length} perfiles configurados</p></div></div>{roles.map(rol=><article key={rol.id} className="roleItem"><b>{rol.nombre}</b><span>{rol.descripcion}</span><div className="permissionGrid compact">{permisos.map(permiso=><label key={`${rol.id}-${permiso.id}`}><input type="checkbox" checked={rol.permisos.includes(permiso.id)} onChange={event=>cambiarPermisoRol(rol,permiso.id,event.target.checked)}/><span>{etiquetasPermiso[permiso.id]}</span></label>)}</div></article>)}</section><section className="panel tablePanel"><div className="panelHead"><div><h2>Usuarios registrados</h2><p>{usuarios.length} cuentas disponibles</p></div></div><div className="tableWrap"><table><thead><tr><th>USUARIO</th><th>NOMBRE</th><th>ROL</th><th>ESTADO</th><th>CREADO</th></tr></thead><tbody>{usuarios.map(item=><tr key={item.id}><td><b>{item.usuario}</b></td><td><input className="inlineInput" value={item.nombre} onChange={event=>setUsuarios(current=>current.map(user=>user.id===item.id?{...user,nombre:event.target.value}:user))} onBlur={event=>actualizarUsuario(item.id,{nombre:event.target.value})}/></td><td><select className="inlineInput" value={item.rolId} onChange={event=>actualizarUsuario(item.id,{rolId:event.target.value})}>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></td><td><button className={item.estado==="activo"?"status done":"status pending"} onClick={()=>actualizarUsuario(item.id,{estado:item.estado==="activo"?"inactivo":"activo"})}>{item.estado}</button></td><td>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</td></tr>)}</tbody></table></div></section></>;
 }
 
-function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: string) => void }) {
+function Bancos({ canUpload, canManageAccounts, notify, requestConfirmation }: { canUpload: boolean; canManageAccounts: boolean; notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [reportes, setReportes] = useState<Reporte[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
   const [file, setFile] = useState<File | null>(null);
-  const [error,setError]=useState("");
-  const [loading,setLoading]=useState(true);
-  const [saving,setSaving]=useState(false);
+  const [cuentaSeleccionada, setCuentaSeleccionada] = useState("");
+  const [detalle, setDetalle] = useState<{ reporte: Reporte; lineas: LineaBanco[] } | null>(null);
+  const [detalleId, setDetalleId] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   async function cargarReportes() {
     setLoading(true);
@@ -521,29 +535,163 @@ function Bancos({ canUpload, notify }: { canUpload: boolean; notify: (message: s
     } finally { setLoading(false); }
   }
 
-  useEffect(()=>{ void Promise.resolve().then(cargarReportes); },[]);
-
-  async function upload(event: FormEvent<HTMLFormElement>){
-    event.preventDefault();
-    if(!file) return setError("Seleccione un archivo CSV o Excel");
-    const formElement=event.currentTarget;
-    setSaving(true); setError("");
-    const form=new FormData(); form.append("archivo",file);
+  async function cargarCuentas() {
     try {
-      const response=await fetch("/api/banco/reportes",{method:"POST",body:form});
-      const result=await response.json().catch(() => ({})) as { reporte?: Reporte; error?: string };
-      if(!response.ok || !result.reporte)return setError(result.error ?? `No se pudo guardar el reporte bancario (HTTP ${response.status})`);
-      setReportes(current=>[result.reporte!,...current]);
+      const response = await fetch("/api/cuentas-bancarias?estado=todas");
+      const data = await response.json().catch(() => ({})) as { cuentasBancarias?: CuentaBancaria[]; error?: string };
+      if (response.ok) setCuentas(data.cuentasBancarias ?? []);
+    } catch { setError("No se pudo cargar el catálogo de cuentas bancarias"); }
+  }
+
+  useEffect(() => { void Promise.resolve().then(cargarReportes); void Promise.resolve().then(cargarCuentas); }, []);
+
+  async function verDetalle(reporte: Reporte) {
+    if (detalleId === reporte.id) { setDetalleId(""); setDetalle(null); return; }
+    setDetalleId(reporte.id); setDetalle(null);
+    try {
+      const response = await fetch(`/api/banco/reportes/${reporte.id}`);
+      const data = await response.json().catch(() => ({})) as { reporte?: Reporte; lineas?: LineaBanco[]; error?: string };
+      if (!response.ok || !data.reporte) return setError(data.error ?? "No se pudo cargar el detalle del reporte");
+      setDetalle({ reporte: data.reporte, lineas: data.lineas ?? [] });
+    } catch { setError("No se pudo conectar con el servicio de reportes bancarios"); }
+  }
+
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file) return setError("Seleccione un archivo CSV o Excel");
+    if (!cuentaSeleccionada) return setError("Seleccione la cuenta bancaria del estado de cuenta");
+    const formElement = event.currentTarget;
+    setSaving(true); setError("");
+    const form = new FormData();
+    form.append("archivo", file);
+    form.append("cuentaBancariaNumero", cuentaSeleccionada);
+    try {
+      const response = await fetch("/api/banco/reportes", { method: "POST", body: form });
+      const result = await response.json().catch(() => ({})) as { reporte?: Reporte; error?: string };
+      if (!response.ok || !result.reporte) return setError(result.error ?? `No se pudo procesar el reporte bancario (HTTP ${response.status})`);
+      setReportes(current => [result.reporte!, ...current]);
       setFile(null);
       formElement.reset();
-      notify("Reporte bancario guardado en PostgreSQL");
+      notify(`Estado bancario procesado: ${result.reporte.totalLineas ?? 0} movimientos guardados`);
     } catch {
       setError("No se pudo conectar con el servicio de reportes bancarios");
     } finally { setSaving(false); }
   }
 
+  const activas = cuentas.filter(cuenta => (cuenta.estado ?? "activa") === "activa");
   const ultimo = reportes[0];
-  return <><div className="pageHead"><div><span className="eyebrow">BANCOS</span><h1>Reportes bancarios</h1><p>Consulta de archivos recibidos y su estado de procesamiento desde la base de datos.</p></div></div><section className="metrics compactMetrics"><article className="metric featured"><p>Archivos recibidos</p><strong>{loading?"...":reportes.length}</strong><small>Registros guardados en PostgreSQL</small></article><article className="metric"><p>Última carga</p><strong>{ultimo?new Date(ultimo.creadoEn??ultimo.fecha).toLocaleDateString("es-NI"):"Sin cargas"}</strong><small>{ultimo?.nombre??"No hay reportes bancarios"}</small></article><article className="metric"><p>Estado reciente</p><strong>{ultimo?.estado??"Pendiente"}</strong><span className={statusClass(ultimo?.estado??"pendiente")}>{ultimo?.estado??"sin archivo"}</span></article></section>{canUpload?<form className="panel uploadPanel bankUploadPanel" onSubmit={upload}><div><h2>Subir reporte del banco</h2><p>El archivo quedará registrado en la tabla reportes_bancarios para auditoría y seguimiento.</p></div><label className="fileDrop"><input type="file" accept=".csv,.xls,.xlsx" onChange={event=>setFile(event.target.files?.[0]??null)}/><span>{file?file.name:"Seleccionar CSV o Excel"}</span>{file?<small>{Math.round(file.size/1024)} KB · listo para registrar</small>:<small>Formatos permitidos: CSV, XLS o XLSX · máximo 10 MB</small>}</label><button className="primary" type="submit" disabled={saving}>{saving?"Subiendo...":"Subir reporte"}</button>{error?<span className="uploadError">{error}</span>:null}</form>:<div className="readOnlyBanner">Acceso de solo lectura: puede consultar reportes, pero no cargarlos.</div>}<section className="panel tablePanel"><div className="panelHead"><div><h2>Historial bancario</h2><p>{loading?"Cargando desde PostgreSQL":`${reportes.length} archivos disponibles`}</p></div><button onClick={cargarReportes}>Actualizar</button></div><div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>FECHA</th><th>TAMAÑO</th><th>CARGADO POR</th><th>ESTADO</th></tr></thead><tbody>{reportes.map(item=><tr key={item.id}><td><b>{item.nombre}</b><small>ID {item.id.slice(0,8)}</small></td><td>{new Date(item.fecha).toLocaleDateString("es-NI")}</td><td>{item.archivoTamano?`${Math.round(item.archivoTamano/1024)} KB`:"-"}</td><td>{item.cargadoPor}</td><td><span className={statusClass(item.estado)}>{item.estado}</span></td></tr>)}</tbody></table></div>{!loading && !reportes.length?<div className="emptyReport">Todavía no hay reportes bancarios guardados. Use el formulario superior para registrar el primer archivo.</div>:null}</section></>;
+  const lineasGuardadas = reportes.reduce((total, reporte) => total + (reporte.totalLineas ?? 0), 0);
+  return <><div className="pageHead"><div><span className="eyebrow">BANCOS</span><h1>Reportes bancarios</h1><p>Carga, procesamiento y consulta de estados de cuenta almacenados en PostgreSQL.</p></div></div>
+    <section className="metrics compactMetrics">
+      <article className="metric featured"><p>Archivos recibidos</p><strong>{loading ? "..." : reportes.length}</strong><small>{reportes.filter(item => item.estado === "procesado").length} procesados correctamente</small></article>
+      <article className="metric"><p>Movimientos guardados</p><strong>{loading ? "..." : lineasGuardadas}</strong><small>Líneas persistidas en la base de datos</small></article>
+      <article className="metric"><p>Última carga</p><strong>{ultimo ? new Date(ultimo.creadoEn ?? ultimo.fecha).toLocaleDateString("es-NI") : "Sin cargas"}</strong><small>{ultimo?.nombre ?? "No hay reportes bancarios"}</small></article>
+      <article className="metric"><p>Estado reciente</p><strong>{ultimo?.estado ?? "Pendiente"}</strong><span className={statusClass(ultimo?.estado ?? "pendiente")}>{ultimo?.estado ?? "sin archivo"}</span></article>
+    </section>
+    {canUpload ? <form className="panel uploadPanel bankUploadPanel" onSubmit={upload}>
+      <div><h2>Subir estado de cuenta</h2><p>El archivo se procesa al recibirlo: cada movimiento queda guardado y disponible para conciliación.</p></div>
+      <label className="uploadField">Cuenta bancaria<select value={cuentaSeleccionada} onChange={event => setCuentaSeleccionada(event.target.value)} required disabled={!activas.length}><option value="" disabled>{activas.length ? "Seleccione una cuenta bancaria" : "Sin cuentas bancarias activas"}</option>{activas.map(cuenta => <option key={cuenta.numeroCuenta} value={cuenta.numeroCuenta}>{cuenta.nombre} · {cuenta.numeroCuenta} · {cuenta.moneda}</option>)}</select></label>
+      <label className="fileDrop"><input type="file" accept=".csv,.xls,.xlsx" onChange={event => setFile(event.target.files?.[0] ?? null)}/><span>{file ? file.name : "Seleccionar CSV o Excel"}</span>{file ? <small>{Math.round(file.size / 1024)} KB · listo para procesar</small> : <small>Se requieren columnas de descripción y de débito, crédito o monto</small>}</label>
+      <button className="primary" type="submit" disabled={saving || !activas.length}>{saving ? "Procesando..." : "Procesar reporte"}</button>
+      {error ? <span className="uploadError">{error}</span> : null}
+    </form> : <div className="readOnlyBanner">Acceso de solo lectura: puede consultar reportes bancarios, pero no cargarlos.</div>}
+    {!canUpload && error ? <div className="authError adminError">{error}</div> : null}
+    <section className="panel tablePanel">
+      <div className="panelHead"><div><h2>Historial bancario</h2><p>{loading ? "Cargando desde PostgreSQL" : `${reportes.length} archivos disponibles`}</p></div><button onClick={cargarReportes}>Actualizar</button></div>
+      <div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>CUENTA</th><th>PERÍODO</th><th>LÍNEAS</th><th>DÉBITOS</th><th>CRÉDITOS</th><th>ESTADO</th><th>CONCILIACIÓN</th><th/></tr></thead><tbody>{reportes.map(item => <tr key={item.id}>
+        <td><b>{item.nombre}</b><small>{item.cargadoPor} · {new Date(item.fecha).toLocaleDateString("es-NI")}</small></td>
+        <td>{item.cuentaBancariaNumero ?? "No asignada"}</td>
+        <td>{item.periodoInicio && item.periodoFin ? `${item.periodoInicio} a ${item.periodoFin}` : "Sin fechas en el archivo"}</td>
+        <td>{item.totalLineas ?? 0}</td>
+        <td className="amount">{dinero.format(Number(item.totalDebitos ?? 0))}</td>
+        <td className="amount">{dinero.format(Number(item.totalCreditos ?? 0))}</td>
+        <td><span className={statusClass(item.estado)}>{item.estado}</span>{item.mensajeError ? <small>{item.mensajeError}</small> : null}</td>
+        <td>{item.conciliacionEstado ? <span className={item.conciliacionEstado === "aprobada" ? "status done" : item.conciliacionEstado === "rechazada" ? "status danger" : "status pending"}>{item.conciliacionEstado}</span> : <small>Sin conciliar</small>}</td>
+        <td>{item.estado === "procesado" ? <button className="linkButton" type="button" onClick={() => verDetalle(item)}>{detalleId === item.id ? "Ocultar" : "Ver detalle"}</button> : null}</td>
+      </tr>)}</tbody></table></div>
+      {!loading && !reportes.length ? <div className="emptyReport">Todavía no hay reportes bancarios guardados. Use el formulario superior para procesar el primer estado de cuenta.</div> : null}
+    </section>
+    {detalleId ? <section className="panel tablePanel">
+      <div className="panelHead"><div><h2>Movimientos del estado de cuenta</h2><p>{detalle ? `${detalle.lineas.length} líneas guardadas de ${detalle.reporte.nombre}` : "Cargando líneas desde PostgreSQL"}</p></div></div>
+      {detalle ? <div className="tableWrap"><table><thead><tr><th>#</th><th>FECHA</th><th>REFERENCIA</th><th>DESCRIPCIÓN</th><th>DÉBITO</th><th>CRÉDITO</th><th>SALDO</th><th>CONCILIACIÓN</th></tr></thead><tbody>{detalle.lineas.map(linea => <tr key={linea.id}>
+        <td>{linea.numeroLinea}</td>
+        <td>{linea.fecha ?? "Sin fecha"}</td>
+        <td>{linea.referencia ?? "Sin referencia"}</td>
+        <td>{linea.descripcion}</td>
+        <td className="amount">{Number(linea.debito) ? dinero.format(Number(linea.debito)) : "-"}</td>
+        <td className="amount">{Number(linea.credito) ? dinero.format(Number(linea.credito)) : "-"}</td>
+        <td className="amount">{linea.saldo === null ? "-" : dinero.format(Number(linea.saldo))}</td>
+        <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span></td>
+      </tr>)}</tbody></table></div> : null}
+    </section> : null}
+    {canManageAccounts ? <CuentasBancariasPanel cuentas={cuentas} onChanged={cargarCuentas} notify={notify} requestConfirmation={requestConfirmation}/> : null}
+  </>;
+}
+
+function CuentasBancariasPanel({ cuentas, onChanged, notify, requestConfirmation }: { cuentas: CuentaBancaria[]; onChanged: () => Promise<void>; notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function crear(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      const response = await fetch("/api/cuentas-bancarias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numeroCuenta: form.get("numeroCuenta"), nombre: form.get("nombre"), moneda: form.get("moneda") }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) return setError(result.error ?? "No se pudo crear la cuenta bancaria");
+      formElement.reset();
+      await onChanged();
+      notify("Cuenta bancaria creada");
+    } finally { setSaving(false); }
+  }
+
+  async function actualizar(numeroCuenta: string, changes: Partial<CuentaBancaria>) {
+    setError("");
+    const response = await fetch(`/api/cuentas-bancarias/${encodeURIComponent(numeroCuenta)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) return setError(result.error ?? "No se pudo actualizar la cuenta bancaria");
+    await onChanged();
+    notify("Cuenta bancaria actualizada");
+  }
+
+  return <section className="adminLayout bankAccountsLayout">
+    <form className="panel formPanel" onSubmit={crear}>
+      <div className="panelHead compact"><div><h2>Nueva cuenta bancaria</h2><p>Las cuentas activas quedan disponibles para minutas y estados de cuenta.</p></div></div>
+      <div className="formGrid">
+        <label>Número de cuenta<input name="numeroCuenta" required maxLength={32} placeholder="Número asignado por el banco"/></label>
+        <label>Nombre<input name="nombre" required placeholder="Banco y tipo de cuenta"/></label>
+        <label>Moneda<select name="moneda" defaultValue="NIO"><option value="NIO">Córdobas (NIO)</option><option value="USD">Dólares (USD)</option></select></label>
+      </div>
+      {error ? <div className="authError adminError">{error}</div> : null}
+      <div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving ? "Creando…" : "Crear cuenta bancaria"}</button></div>
+    </form>
+    <section className="panel tablePanel bankAccountsTable">
+      <div className="panelHead"><div><h2>Cuentas bancarias</h2><p>{cuentas.length} registradas</p></div></div>
+      <div className="tableWrap"><table><thead><tr><th>NÚMERO</th><th>NOMBRE</th><th>MONEDA</th><th>ESTADO</th></tr></thead><tbody>{cuentas.map(cuenta => <tr key={cuenta.numeroCuenta}>
+        <td><b>{cuenta.numeroCuenta}</b></td>
+        <td><input className="inlineInput" defaultValue={cuenta.nombre} onBlur={event => { if (event.target.value.trim() && event.target.value !== cuenta.nombre) void actualizar(cuenta.numeroCuenta, { nombre: event.target.value.trim() }); }}/></td>
+        <td>{cuenta.moneda}</td>
+        <td><button type="button" className={(cuenta.estado ?? "activa") === "activa" ? "status done" : "status pending"} onClick={() => requestConfirmation({
+          title: "Confirmar cambio de cuenta bancaria",
+          message: `${(cuenta.estado ?? "activa") === "activa" ? "Se desactivará" : "Se activará"} la cuenta ${cuenta.nombre} · ${cuenta.numeroCuenta}. Las cuentas inactivas no se pueden usar en minutas ni estados de cuenta.`,
+          confirmLabel: "Aplicar cambio",
+          isDanger: (cuenta.estado ?? "activa") === "activa",
+          onConfirm: () => actualizar(cuenta.numeroCuenta, { estado: (cuenta.estado ?? "activa") === "activa" ? "inactiva" : "activa" }),
+        })}>{cuenta.estado ?? "activa"}</button></td>
+      </tr>)}</tbody></table></div>
+      {!cuentas.length ? <div className="emptyReport">Todavía no hay cuentas bancarias registradas.</div> : null}
+    </section>
+  </section>;
 }
 
 function Importaciones({ notify }: { notify: (message: string) => void }) {
@@ -645,4 +793,229 @@ function PeriodoControl({label,value,onChange,granularidad}:{label:string;value:
   const common={value,onChange:(event:React.ChangeEvent<HTMLInputElement|HTMLSelectElement>)=>onChange(event.target.value)};
   const years = Array.from({ length: 7 }, (_, index) => currentYear() - index);
   return <label className="periodControl"><span>{label}</span>{granularidad==="dia"?<input type="date" min="2000-01-01" max="2100-12-31" {...common}/>:granularidad==="mes"?<input type="month" min="2000-01" max="2100-12" {...common}/>:granularidad==="trimestre"?<select {...common}>{years.flatMap(year=>[1,2,3,4].map(q=><option key={`${year}-T${q}`} value={`${year}-T${q}`}>Trimestre {q} · {year}</option>))}</select>:<select {...common}>{years.map(year=><option key={year} value={String(year)}>Año {year}</option>)}</select>}<small>{value}</small></label>;
+}
+
+const estadoLineaClass = (estado: LineaBanco["estadoConciliacion"]) => estado === "conciliada" ? "status done" : estado === "descartada" ? "status danger" : "status pending";
+const estadoConciliacionClass = (estado: Conciliacion["estado"]) => estado === "aprobada" ? "status done" : estado === "rechazada" ? "status danger" : "status pending";
+const netoLinea = (linea: LineaBanco) => Number(linea.credito) - Number(linea.debito);
+
+function ConciliacionBancaria({ canReconcile, canApprove, notify, requestConfirmation }: { canReconcile: boolean; canApprove: boolean; notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
+  const [conciliaciones, setConciliaciones] = useState<Conciliacion[]>([]);
+  const [disponibles, setDisponibles] = useState<ReporteDisponible[]>([]);
+  const [seleccionada, setSeleccionada] = useState("");
+  const [detalle, setDetalle] = useState<{ conciliacion: Conciliacion; lineas: LineaConciliacion[]; movimientos: MovimientoConciliable[] } | null>(null);
+  const [reporteNuevo, setReporteNuevo] = useState("");
+  const [enlaces, setEnlaces] = useState<Record<string, string>>({});
+  const [observaciones, setObservaciones] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function cargarLista() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/conciliaciones");
+      const data = await response.json().catch(() => ({})) as { conciliaciones?: Conciliacion[]; reportesDisponibles?: ReporteDisponible[]; error?: string };
+      if (!response.ok) return setError(data.error ?? "No se pudo cargar el historial de conciliaciones");
+      setConciliaciones(data.conciliaciones ?? []);
+      setDisponibles(data.reportesDisponibles ?? []);
+      setError("");
+    } catch {
+      setError("No se pudo conectar con el servicio de conciliaciones");
+    } finally { setLoading(false); }
+  }
+
+  async function cargarDetalle(id: string) {
+    setSeleccionada(id); setDetalle(null); setEnlaces({}); setObservaciones("");
+    try {
+      const response = await fetch(`/api/conciliaciones/${id}`);
+      const data = await response.json().catch(() => ({})) as { conciliacion?: Conciliacion; lineas?: LineaConciliacion[]; movimientos?: MovimientoConciliable[]; error?: string };
+      if (!response.ok || !data.conciliacion) return setError(data.error ?? "No se pudo cargar la conciliación");
+      setDetalle({ conciliacion: data.conciliacion, lineas: data.lineas ?? [], movimientos: data.movimientos ?? [] });
+      setError("");
+    } catch { setError("No se pudo conectar con el servicio de conciliaciones"); }
+  }
+
+  useEffect(() => { void Promise.resolve().then(cargarLista); }, []);
+
+  async function generar() {
+    if (!reporteNuevo) return setError("Seleccione un estado de cuenta procesado");
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/conciliaciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reporteId: reporteNuevo }),
+      });
+      const result = await response.json().catch(() => ({})) as { conciliacion?: Conciliacion; enlazadasAutomaticamente?: number; error?: string };
+      if (!response.ok || !result.conciliacion) return setError(result.error ?? "No se pudo generar la conciliación");
+      setReporteNuevo("");
+      await cargarLista();
+      await cargarDetalle(result.conciliacion.id);
+      notify(`Conciliación generada: ${result.enlazadasAutomaticamente ?? 0} líneas enlazadas automáticamente`);
+    } finally { setSaving(false); }
+  }
+
+  async function accionLinea(accion: "conciliar" | "descartar" | "reabrir", linea: LineaConciliacion) {
+    if (!detalle) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch(`/api/conciliaciones/${detalle.conciliacion.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion, lineaId: linea.id, movimientoId: accion === "conciliar" ? enlaces[linea.id] : undefined }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) return setError(result.error ?? "No se pudo actualizar la línea");
+      await cargarDetalle(detalle.conciliacion.id);
+      await cargarLista();
+      notify(accion === "conciliar" ? "Línea enlazada con el movimiento contable" : accion === "descartar" ? "Línea descartada de la conciliación" : "Línea devuelta a pendiente");
+    } finally { setSaving(false); }
+  }
+
+  function revisar(accion: "aprobar" | "rechazar") {
+    if (!detalle) return;
+    if (accion === "rechazar" && !observaciones.trim()) return setError("Indique el motivo del rechazo en las observaciones");
+    requestConfirmation({
+      title: accion === "aprobar" ? "Aprobar conciliación bancaria" : "Rechazar conciliación bancaria",
+      message: accion === "aprobar"
+        ? `Se aprobará la conciliación del período ${detalle.conciliacion.periodo} para la cuenta ${detalle.conciliacion.cuentaBancariaNombre ?? detalle.conciliacion.cuentaBancariaNumero}. La conciliación quedará cerrada y auditada.`
+        : `Se rechazará la conciliación del período ${detalle.conciliacion.periodo}. El motivo quedará registrado en la auditoría del sistema.`,
+      confirmLabel: accion === "aprobar" ? "Aprobar" : "Rechazar",
+      isDanger: accion === "rechazar",
+      onConfirm: async () => {
+        const response = await fetch(`/api/conciliaciones/${detalle.conciliacion.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accion, observaciones: observaciones.trim() || undefined }),
+        });
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        if (!response.ok) return setError(result.error ?? "No se pudo revisar la conciliación");
+        await cargarDetalle(detalle.conciliacion.id);
+        await cargarLista();
+        notify(accion === "aprobar" ? "Conciliación aprobada" : "Conciliación rechazada");
+      },
+    });
+  }
+
+  const conciliacion = detalle?.conciliacion;
+  const editable = Boolean(conciliacion && conciliacion.estado === "borrador" && canReconcile);
+  const disponiblesMovimientos = (detalle?.movimientos ?? []).filter(movimiento => !movimiento.lineaId);
+
+  return <><div className="pageHead"><div><span className="eyebrow">CONCILIACIÓN</span><h1>Conciliación bancaria</h1><p>Enlace cada movimiento del estado de cuenta con las minutas registradas y cierre el período con aprobación.</p></div></div>
+    {error ? <div className="authError adminError">{error}</div> : null}
+    {canReconcile ? <section className="panel uploadPanel">
+      <div><h2>Generar conciliación</h2><p>Al generarla, el sistema enlaza automáticamente las líneas con una única minuta coincidente por monto y fecha.</p></div>
+      <label className="uploadField">Estado de cuenta procesado<select value={reporteNuevo} onChange={event => setReporteNuevo(event.target.value)} disabled={!disponibles.length}><option value="" disabled>{disponibles.length ? "Seleccione un estado de cuenta" : "No hay estados de cuenta pendientes de conciliar"}</option>{disponibles.map(reporte => <option key={reporte.id} value={reporte.id}>{reporte.nombre} · {reporte.cuentaBancariaNumero} · {reporte.totalLineas} líneas</option>)}</select></label>
+      <button className="primary" type="button" onClick={generar} disabled={saving || !reporteNuevo}>{saving ? "Generando…" : "Generar conciliación"}</button>
+    </section> : <div className="readOnlyBanner">Acceso de solo lectura: puede consultar conciliaciones, pero no modificarlas.</div>}
+    <section className="panel tablePanel">
+      <div className="panelHead"><div><h2>Conciliaciones registradas</h2><p>{loading ? "Cargando desde PostgreSQL" : `${conciliaciones.length} conciliaciones`}</p></div><button onClick={cargarLista}>Actualizar</button></div>
+      <div className="tableWrap"><table><thead><tr><th>PERÍODO</th><th>CUENTA</th><th>ESTADO DE CUENTA</th><th>NETO BANCO</th><th>CONCILIADO</th><th>PENDIENTE</th><th>LÍNEAS</th><th>ESTADO</th><th/></tr></thead><tbody>{conciliaciones.map(item => <tr key={item.id}>
+        <td><b>{item.periodo}</b><small>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</small></td>
+        <td>{item.cuentaBancariaNombre ?? item.cuentaBancariaNumero}</td>
+        <td>{item.reporteNombre ?? "-"}</td>
+        <td className="amount">{dinero.format(Number(item.totalBanco))}</td>
+        <td className="amount">{dinero.format(Number(item.totalConciliado))}</td>
+        <td className={Math.abs(Number(item.totalPendiente)) < 0.01 ? "amount positive" : "amount negative"}>{dinero.format(Number(item.totalPendiente))}</td>
+        <td>{item.lineasConciliadas} de {item.lineasConciliadas + item.lineasPendientes}</td>
+        <td><span className={estadoConciliacionClass(item.estado)}>{item.estado}</span></td>
+        <td><button className="linkButton" type="button" onClick={() => cargarDetalle(item.id)}>{seleccionada === item.id ? "Actualizar" : "Abrir"}</button></td>
+      </tr>)}</tbody></table></div>
+      {!loading && !conciliaciones.length ? <div className="emptyReport">Todavía no hay conciliaciones. Procese un estado de cuenta y genere la primera conciliación.</div> : null}
+    </section>
+    {conciliacion ? <>
+      <section className="metrics compactMetrics">
+        <article className="metric featured"><p>Neto del banco</p><strong>{dinero.format(Number(conciliacion.totalBanco))}</strong><span className={estadoConciliacionClass(conciliacion.estado)}>{conciliacion.estado}</span></article>
+        <article className="metric"><p>Conciliado con libros</p><strong>{dinero.format(Number(conciliacion.totalConciliado))}</strong><small>{conciliacion.lineasConciliadas} líneas enlazadas</small></article>
+        <article className="metric"><p>Diferencia pendiente</p><strong className={Math.abs(Number(conciliacion.totalPendiente)) < 0.01 ? "positive" : "negative"}>{dinero.format(Number(conciliacion.totalPendiente))}</strong><small>{conciliacion.lineasPendientes} líneas sin resolver</small></article>
+        <article className="metric"><p>Minutas sin respaldo bancario</p><strong>{conciliacion.movimientosSinConciliar}</strong><small>Registradas en libros y ausentes del estado de cuenta</small></article>
+      </section>
+      <section className="panel tablePanel">
+        <div className="panelHead">
+          <div><h2>Detalle de la conciliación</h2><p>{conciliacion.reporteNombre} · cuenta {conciliacion.cuentaBancariaNombre ?? conciliacion.cuentaBancariaNumero} · período {conciliacion.periodo}</p></div>
+          {canApprove && conciliacion.estado === "borrador" ? <div className="reviewActions"><label>Observaciones<textarea value={observaciones} onChange={event => setObservaciones(event.target.value)} rows={2} placeholder="Obligatorias para rechazar"/></label><div className="reportActions"><button className="secondary" type="button" onClick={() => revisar("rechazar")}>Rechazar</button><button className="primary" type="button" onClick={() => revisar("aprobar")} disabled={conciliacion.lineasPendientes > 0}>Aprobar conciliación</button></div></div> : null}
+        </div>
+        {conciliacion.estado !== "borrador" ? <div className="readOnlyBanner">Conciliación {conciliacion.estado} por {conciliacion.revisadoPorNombre ?? "revisor no registrado"}{conciliacion.revisadoEn ? ` el ${new Date(conciliacion.revisadoEn).toLocaleString("es-NI")}` : ""}.{conciliacion.observaciones ? ` Observaciones: ${conciliacion.observaciones}` : ""}</div> : null}
+        {conciliacion.estado === "borrador" && conciliacion.lineasPendientes > 0 && canApprove ? <div className="readOnlyBanner">Para aprobar debe enlazar o descartar las {conciliacion.lineasPendientes} líneas pendientes.</div> : null}
+        <div className="tableWrap"><table><thead><tr><th>#</th><th>FECHA</th><th>DESCRIPCIÓN</th><th>MONTO</th><th>ESTADO</th><th>MOVIMIENTO CONTABLE</th></tr></thead><tbody>{(detalle?.lineas ?? []).map(linea => <tr key={linea.id}>
+          <td>{linea.numeroLinea}</td>
+          <td>{linea.fecha ?? "Sin fecha"}</td>
+          <td><b>{linea.descripcion}</b>{linea.referencia ? <small>Ref. {linea.referencia}</small> : null}</td>
+          <td className={netoLinea(linea) < 0 ? "amount negative" : "amount positive"}>{dinero.format(netoLinea(linea))}</td>
+          <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span></td>
+          <td>{linea.movimiento
+            ? <div className="matchCell"><b>{linea.movimiento.concepto}</b><small>{linea.movimiento.fecha} · {dinero.format(linea.movimiento.monto)}</small>{editable ? <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Deshacer enlace</button> : null}</div>
+            : editable
+              ? <div className="matchCell">
+                  <select value={enlaces[linea.id] ?? ""} onChange={event => setEnlaces(current => ({ ...current, [linea.id]: event.target.value }))} disabled={!disponiblesMovimientos.length}>
+                    <option value="">{disponiblesMovimientos.length ? "Seleccione un movimiento" : "Sin minutas disponibles en el período"}</option>
+                    {disponiblesMovimientos.map(movimiento => <option key={movimiento.id} value={movimiento.id}>{movimiento.fecha} · {dinero.format(movimiento.monto)} · {movimiento.concepto}{Math.abs(movimiento.monto - Math.abs(netoLinea(linea))) < 0.01 ? " · monto coincide" : ""}</option>)}
+                  </select>
+                  <div className="matchActions">
+                    <button className="linkButton" type="button" onClick={() => accionLinea("conciliar", linea)} disabled={saving || !enlaces[linea.id]}>Enlazar</button>
+                    {linea.estadoConciliacion === "pendiente"
+                      ? <button className="linkButton" type="button" onClick={() => accionLinea("descartar", linea)} disabled={saving}>Descartar</button>
+                      : <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Reabrir</button>}
+                  </div>
+                </div>
+              : <small>{linea.estadoConciliacion === "descartada" ? "Descartada sin enlace contable" : "Sin movimiento enlazado"}</small>}</td>
+        </tr>)}</tbody></table></div>
+      </section>
+      {disponiblesMovimientos.length ? <section className="panel tablePanel">
+        <div className="panelHead"><div><h2>Minutas sin respaldo bancario</h2><p>Movimientos registrados en libros sobre esta cuenta que no aparecen enlazados</p></div></div>
+        <div className="tableWrap"><table><thead><tr><th>FECHA</th><th>CONCEPTO</th><th>REFERENCIA</th><th>MONTO</th></tr></thead><tbody>{disponiblesMovimientos.map(movimiento => <tr key={movimiento.id}>
+          <td>{movimiento.fecha}</td>
+          <td>{movimiento.concepto}</td>
+          <td>{movimiento.referencia ?? "Sin referencia"}</td>
+          <td className="amount">{dinero.format(movimiento.monto)}</td>
+        </tr>)}</tbody></table></div>
+      </section> : null}
+    </> : null}
+  </>;
+}
+
+function ConfiguracionInstitucional({ config, onSaved, notify }: { config: ConfiguracionSistema; onSaved: (config: ConfiguracionSistema) => void; notify: (message: string) => void }) {
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function guardar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/configuracion", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          institucionNombre: form.get("institucionNombre"),
+          sistemaNombre: form.get("sistemaNombre"),
+          sistemaDescripcion: form.get("sistemaDescripcion"),
+          logoLogin: form.get("logoLogin"),
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { configuracion?: ConfiguracionSistema; error?: string };
+      if (!response.ok || !result.configuracion) return setError(result.error ?? "No se pudo guardar la configuración institucional");
+      onSaved(result.configuracion);
+      notify("Configuración institucional actualizada");
+    } catch {
+      setError("No se pudo conectar con el servicio de configuración");
+    } finally { setSaving(false); }
+  }
+
+  return <><div className="pageHead"><div><span className="eyebrow">ADMINISTRACIÓN</span><h1>Configuración institucional</h1><p>Datos que identifican a la institución en el acceso, la barra lateral y los reportes.</p></div></div>
+    <form className="panel formPanel" onSubmit={guardar}>
+      <div className="panelHead compact"><div><h2>Identidad del sistema</h2><p>Los cambios se guardan en PostgreSQL y quedan registrados en auditoría.</p></div></div>
+      <div className="formGrid">
+        <label>Nombre institucional<input name="institucionNombre" required maxLength={120} defaultValue={config.institucionNombre}/></label>
+        <label>Nombre del sistema<input name="sistemaNombre" required maxLength={40} defaultValue={config.sistemaNombre}/></label>
+        <label className="wide">Descripción del sistema<input name="sistemaDescripcion" required maxLength={160} defaultValue={config.sistemaDescripcion}/></label>
+        <label className="wide">Ruta del logo institucional<input name="logoLogin" required maxLength={200} defaultValue={config.logoLogin}/><small>Ruta interna dentro de public/, por ejemplo /universal-nicaragua-login.png</small></label>
+        <label>Moneda funcional<input value={config.moneda} readOnly/><small>Regla contable del sistema; no se edita desde la interfaz.</small></label>
+      </div>
+      <div className="configPreview"><span className="brandMark logoMark" style={{ backgroundImage: `url(${config.logoLogin})` }} role="img" aria-label={config.institucionNombre}/><div><b>{config.sistemaNombre}</b><small>{config.institucionNombre} · {config.sistemaDescripcion}</small></div></div>
+      {error ? <div className="authError adminError">{error}</div> : null}
+      <div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving ? "Guardando…" : "Guardar configuración"}</button></div>
+    </form>
+  </>;
 }

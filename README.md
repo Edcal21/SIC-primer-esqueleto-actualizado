@@ -94,6 +94,33 @@ Compruebe la conexión con la aplicación en ejecución visitando `http://localh
 
 El catálogo puede administrarse desde la pantalla “Catálogo contable”. Además, cada balanza importada crea o actualiza cuentas activas en `cuentas_contables` cuando detecta códigos válidos de 8 dígitos. Los reportes financieros se generan desde las balanzas importadas; si no existe información para el período solicitado, el sistema muestra un mensaje de falta de datos en vez de usar cifras de relleno.
 
+## Bancos y conciliación bancaria
+
+El estado de cuenta se procesa en el momento de la carga: `lib/banco.ts` interpreta CSV, XLS y XLSX,
+reconoce encabezados en español o inglés (fecha, descripción o concepto, referencia, débito o cargo,
+crédito o abono, monto y saldo) y guarda cada movimiento en `lineas_reporte_bancario`. Si el archivo
+no es legible, el reporte queda registrado con estado `error` y el motivo, y el intento se audita.
+Un archivo con una sola columna de monto se interpreta con el signo: negativo es débito y positivo es crédito.
+
+La conciliación se genera sobre un estado de cuenta procesado y compara el banco contra las minutas
+registradas en `movimientos_cuentas` para esa misma cuenta bancaria y período:
+
+- **Neto del banco**: créditos menos débitos de todas las líneas del estado de cuenta.
+- **Conciliado**: neto de las líneas enlazadas con una minuta.
+- **Diferencia pendiente**: neto de las líneas que aún no se enlazaron ni descartaron.
+- **Minutas sin respaldo bancario**: movimientos de libros de esa cuenta y período que no aparecen enlazados.
+
+Al generarla, el sistema enlaza automáticamente solo las líneas con una **única** minuta coincidente por
+monto y fecha; nunca decide entre empates. El resto se enlaza o descarta manualmente. Una conciliación
+solo puede aprobarse cuando no quedan líneas pendientes, y aprobarla o rechazarla exige el permiso
+`conciliacion:aprobar`, separado del permiso de carga `banco:cargar` para mantener segregación de funciones.
+Cada enlace, descarte, aprobación y rechazo queda registrado en auditoría.
+
+La migración `0017_conciliacion_bancaria` crea `lineas_reporte_bancario` y `conciliaciones_bancarias`,
+amplía `reportes_bancarios` con cuenta bancaria, período y totales, agrega el permiso
+`configuracion:administrar` y otorga al rol administrador los permisos `banco:ver`,
+`conciliacion:aprobar` y `configuracion:administrar`.
+
 ## Estructura
 
 ```text
@@ -101,13 +128,16 @@ app/                 Interfaz principal y rutas API
   api/auth/          Inicio, consulta y cierre de sesión
   api/movimientos/   Registro y consulta de movimientos contables
   api/iglesias/      Catálogo de iglesias disponible para movimientos
-  api/banco/         Consulta y carga de reportes bancarios
+  api/banco/         Procesamiento y consulta de estados de cuenta bancarios
+  api/conciliaciones/ Conciliación bancaria entre estado de cuenta y minutas
+  api/cuentas-bancarias/ Administración de cuentas bancarias
+  api/configuracion/ Configuración institucional editable
   api/catalogo/      Administración de cuentas contables
   api/reportes/      Generación y descarga de reportes
   api/auditoria/     Consulta de eventos de auditoría
 db/                  Esquema Drizzle y acceso a PostgreSQL
 drizzle/             Migraciones SQL
-lib/                 Autenticación y lógica de reportes
+lib/                 Autenticación, auditoría, reportes y procesamiento bancario
 worker/              Entrada de Cloudflare Worker
 public/              Recursos estáticos
 tests/               Pruebas automatizadas
@@ -122,7 +152,13 @@ tests/               Pruebas automatizadas
 | `/api/auth/logout` | `POST` | Elimina la sesión. |
 | `/api/movimientos` | `GET`, `POST` | Consulta o registra encabezados y detalles de movimientos. |
 | `/api/iglesias` | `GET` | Lista las iglesias activas y sus códigos. |
-| `/api/banco/reportes` | `GET`, `POST` | Consulta o recibe archivos bancarios. |
+| `/api/banco/reportes` | `GET`, `POST` | Consulta el historial y procesa estados de cuenta guardando cada movimiento. |
+| `/api/banco/reportes/:id` | `GET` | Devuelve el estado de cuenta con sus líneas persistidas. |
+| `/api/conciliaciones` | `GET`, `POST` | Consulta conciliaciones y genera una nueva desde un estado de cuenta procesado. |
+| `/api/conciliaciones/:id` | `GET`, `PATCH` | Detalle de la conciliación y acciones de enlace, descarte, aprobación o rechazo. |
+| `/api/cuentas-bancarias` | `GET`, `POST` | Consulta y crea cuentas bancarias institucionales. |
+| `/api/cuentas-bancarias/:numeroCuenta` | `PATCH` | Actualiza nombre, moneda o estado de una cuenta bancaria. |
+| `/api/configuracion` | `GET`, `PUT` | Consulta y edita la configuración institucional. |
 | `/api/catalogo/cuentas` | `GET`, `POST` | Consulta y crea cuentas contables. |
 | `/api/catalogo/cuentas/:codigo` | `PATCH` | Actualiza cuenta contable, estado o uso en movimientos. |
 | `/api/reportes` | `GET` | Consulta reportes disponibles. |
@@ -140,9 +176,25 @@ pnpm lint
 pnpm build
 ```
 
-`pnpm test` está disponible, pero las pruebas actuales parecen heredadas de una plantilla de vista previa y no reflejan completamente la interfaz SIC; deben actualizarse antes de utilizarlas como criterio de aceptación.
+```bash
+pnpm test
+```
 
-Pendiente para producción: conciliación bancaria real, pruebas alineadas al flujo SIC, PostgreSQL administrado, secretos, HTTPS, monitoreo y respaldos.
+`pnpm test` compila el proyecto y ejecuta las pruebas de `tests/`: renderizado del acceso, ausencia de datos
+de muestra en los archivos de ejecución, verificación de que todo módulo del menú tiene pantalla conectada y
+comprobación de que la carga bancaria persiste líneas y de que conciliación y configuración exigen permisos.
+
+Pendiente para producción, en orden de prioridad:
+
+1. **Pruebas del intérprete bancario con archivos reales de cada banco.** `lib/banco.ts` cubre los encabezados
+   más comunes, pero cada banco publica su propio formato; valide un archivo real por banco antes de operar.
+2. **Consulta y anulación de minutas desde la interfaz.** `GET /api/movimientos` existe y no tiene pantalla;
+   hoy las minutas se consultan a través de la conciliación y de los reportes.
+3. **CRUD de iglesias desde administración.** Hoy el catálogo de iglesias se mantiene por migración.
+4. **Conversión de moneda para cuentas en USD.** El sistema opera en córdobas; una cuenta bancaria en USD se
+   concilia contra minutas registradas en córdobas sin aplicar tipo de cambio.
+5. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
+6. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
 
 ## Soporte
 

@@ -99,6 +99,31 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;back
 .movementFoot .formActions{margin:0;padding:0}
 @media(max-width:900px){.movementHead .balanceSummary{width:100%;min-width:0}.movementFoot{align-items:stretch;flex-direction:column}.movementFoot .formActions{justify-content:stretch}.movementFoot .formActions button{flex:1}}
 
+/* Bancos, conciliación y configuración institucional */
+.linkButton{border:0;background:none;padding:0;color:var(--accent-dark);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.linkButton:hover:not(:disabled){text-decoration:underline}
+.linkButton:disabled{color:var(--text-subtle);cursor:not-allowed}
+.uploadField{display:grid;gap:6px;min-width:240px;flex:1;font-size:12px;font-weight:700;color:var(--blue-dark)}
+.uploadField select{border:1px solid var(--line);border-radius:7px;padding:10px;background:#fff;color:var(--ink);font-size:13px;font-weight:400}
+.bankUploadPanel{grid-template-columns:minmax(200px,1fr) minmax(220px,1fr) minmax(220px,1fr) auto}
+.matchCell{display:grid;gap:6px;min-width:260px}
+.matchCell select{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px;background:#fff;color:var(--ink);font-size:12px}
+.matchCell b{display:block;font-size:12px;color:var(--blue-dark)}
+.matchCell small{display:block;font-size:11px}
+.matchActions{display:flex;gap:14px;align-items:center}
+.reviewActions{display:grid;gap:8px;min-width:280px}
+.reviewActions label{display:grid;gap:5px;font-size:12px;font-weight:700;color:var(--blue-dark)}
+.reviewActions textarea{border:1px solid var(--line);border-radius:7px;padding:8px;background:#fff;color:var(--ink);font-size:12px;font-family:inherit;resize:vertical}
+.bankAccountsLayout{margin-top:14px;align-items:start}
+.bankAccountsLayout .tablePanel{margin-top:0}
+.bankAccountsTable .tableWrap{max-height:none}
+.configPreview{display:flex;align-items:center;gap:14px;margin-top:18px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:#f8fafc}
+.configPreview b{display:block;font:700 17px Georgia;color:var(--blue-dark)}
+.configPreview small{display:block;margin-top:3px;font-size:12px;color:var(--text-soft)}
+.configPreview .logoMark{flex:0 0 auto}
+@media(max-width:1100px){.bankUploadPanel{grid-template-columns:1fr 1fr}}
+@media(max-width:900px){.bankUploadPanel{grid-template-columns:1fr}.bankUploadPanel .uploadField{width:100%}.matchCell{min-width:0}}
+
 @media print{
   @page{size:A4;margin:12mm}
   .sidebar,.topbar,.timelineSlicer,.reportCatalog,.secondary,.toast,.authScreen,.modalOverlay{display:none!important}

@@ -51,3 +51,29 @@ test("keeps sample data out of SIC runtime files", async () => {
   assert.match(auth, /SIC_ALLOW_LOCAL_AUTH_FALLBACK/);
   assert.doesNotMatch(readme, /maqueta|prototipo funcional con datos demostrativos|Las rutas se orientan a demostración/);
 });
+
+test("every navigable module has a real screen wired in the shell", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const menu = page.slice(page.indexOf("const menu = ["), page.indexOf("const menuGroups"));
+  const nombres = [...menu.matchAll(/nombre: "([^"]+)"/g)].map(match => match[1]);
+
+  assert.ok(nombres.length >= 8, "el menú debe exponer los módulos del sistema");
+  for (const nombre of nombres) {
+    assert.match(page, new RegExp(`active === "${nombre}" \\?`), `El módulo "${nombre}" no tiene pantalla conectada y caería en el placeholder`);
+  }
+});
+
+test("bank statements and reconciliation persist to PostgreSQL", async () => {
+  const [carga, conciliacion, configuracion] = await Promise.all([
+    readFile(new URL("../app/api/banco/reportes/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/conciliaciones/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/configuracion/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(carga, /leerEstadoBancario/, "la carga bancaria debe procesar el contenido del archivo");
+  assert.match(carga, /insert\(lineasReporteBancario\)/, "las líneas del estado de cuenta deben guardarse");
+  assert.match(carga, /puede\(user, "banco:cargar"\)/);
+  assert.match(conciliacion, /puede\(user, "conciliacion:aprobar"\)/, "aprobar conciliaciones exige el permiso correspondiente");
+  assert.match(conciliacion, /registrarAuditoria/, "las acciones de conciliación deben auditarse");
+  assert.match(configuracion, /puede\(user, "configuracion:administrar"\)/);
+});
