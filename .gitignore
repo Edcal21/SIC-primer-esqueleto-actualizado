@@ -42,3 +42,7 @@ yarn-error.log*
 /outputs/
 /work/
 tsconfig.tsbuildinfo
+
+# Archivos locales de auditoría IA
+sic-nemotron-auditoria-produccion.txt
+sic-ui-para-google-ai-studio.txt
