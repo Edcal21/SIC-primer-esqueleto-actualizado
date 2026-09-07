@@ -182,6 +182,53 @@ amplía `reportes_bancarios` con cuenta bancaria, período y totales, agrega el 
 `configuracion:administrar` y otorga al rol administrador los permisos `banco:ver`,
 `conciliacion:aprobar` y `configuracion:administrar`.
 
+## Cuentas bancarias en USD
+
+La contabilidad se mantiene siempre en NIO. Una cuenta bancaria puede declararse en USD; en ese caso el
+sistema captura el importe bancario original en dólares y calcula su equivalente en NIO con la tasa
+vigente, sin perder nunca el importe original.
+
+- **Catálogo de tasas** (`tasas_cambio`, pantalla Configuración → Tasas de cambio, permiso
+  `configuracion:administrar`): una tasa NIO-por-USD por fecha exacta, con fuente obligatoria y valor
+  positivo. NIO usa tasa 1 de forma implícita; no se cataloga. La búsqueda es por **fecha exacta**, no
+  por la tasa vigente más reciente: si falta la tasa del día, el sistema bloquea el registro con un
+  error claro en vez de aproximar con otra fecha. Corregir una tasa ya registrada nunca recalcula los
+  movimientos que ya la aplicaron: cada línea conserva la tasa con la que se guardó.
+- **Minutas** (`app/modules/Movimiento.tsx`, `lib/movimientos.ts`): cada línea de detalle puede marcarse
+  como "línea bancaria" (`afecta_cuenta_bancaria`); el sistema nunca asume que el importe que afecta el
+  banco es la suma de todos los débitos, porque una minuta puede tener líneas de detalle (impuestos,
+  desgloses de gasto) que no tocan la cuenta bancaria. Si la cuenta bancaria de la minuta es USD, la
+  línea marcada exige el importe original en USD; el importe en NIO (columna `monto`, la que participa
+  en la partida doble) se calcula con aritmética decimal exacta (`lib/moneda.ts`, punto fijo con
+  `BigInt`, redondeo a 2 decimales) y la base de datos además valida con un `CHECK`
+  (`monto = round(monto_original * tasa_cambio, 2)`) que ningún camino de escritura pueda saltarse esa
+  regla.
+- **Estados de cuenta** (`lib/banco.ts`): cada línea del archivo se guarda en la moneda de la cuenta
+  bancaria; nunca se convierte un estado de cuenta completo con una tasa única, cada línea resuelve su
+  propia tasa por su propia fecha. Una línea de una cuenta USD sin tasa registrada para su fecha se
+  guarda igual pero queda **pendiente de completar**: bloqueada para enlace automático o manual hasta
+  que se registre la tasa de esa fecha en el catálogo (nunca se infiere). Al recalcular una
+  conciliación el sistema intenta completar automáticamente las líneas pendientes con el catálogo
+  vigente, sin inventar ningún valor.
+- **Conciliación**: el enlace (automático y manual) compara siempre importes en la misma moneda
+  original — el importe USD de la minuta contra el importe USD del banco — nunca el equivalente en
+  NIO, que puede diferir entre ambos lados si la tasa cambió entre la fecha de la minuta y la del
+  banco. Los totales de la conciliación (neto del banco, conciliado, pendiente) se muestran en la
+  moneda de la cuenta.
+- **Cambio de moneda de una cuenta bancaria**: bloqueado en cuanto la cuenta tiene alguna minuta o
+  algún estado de cuenta cargado (`lib/cuentasBancarias.ts`), para no reinterpretar retroactivamente
+  importes ya contabilizados o conciliados.
+- **Compatibilidad histórica**: la migración `0021_moneda_usd_nio` no inventa datos para movimientos
+  existentes. Las líneas contables previas quedan en NIO con tasa 1 (es lo único que registraron
+  siempre). Las líneas de estados de cuenta previos de una cuenta USD quedan con moneda USD conocida
+  pero tasa nula ("pendiente de completar"), porque su importe original en USD nunca se capturó por
+  separado y no se debe adivinar.
+- **Pendiente, fuera de este alcance**: la valoración cambiaria de cierre (diferencia entre el saldo en
+  libros a la tasa histórica y el saldo del banco a la tasa de cierre) no genera asientos automáticos;
+  el sistema separa la diferencia bancaria (partidas sin enlazar) de la diferencia cambiaria, pero la
+  política contable para reconocer esa diferencia cambiaria (cuenta contable, periodicidad, aprobación)
+  queda pendiente de definir con contabilidad antes de automatizarla.
+
 ## Estructura
 
 ```text
@@ -198,7 +245,7 @@ app/                 Interfaz principal y rutas API
   api/auditoria/     Consulta de eventos de auditoría
 db/                  Esquema Drizzle y acceso a PostgreSQL
 drizzle/             Migraciones SQL
-lib/                 Autenticación, auditoría, reportes y procesamiento bancario
+lib/                 Autenticación, auditoría, reportes, procesamiento bancario y moneda (USD/NIO)
 worker/              Entrada de Cloudflare Worker
 public/              Recursos estáticos
 tests/               Pruebas automatizadas
@@ -220,7 +267,9 @@ tests/               Pruebas automatizadas
 | `/api/conciliaciones` | `GET`, `POST` | Consulta conciliaciones y genera una nueva desde un estado de cuenta procesado. |
 | `/api/conciliaciones/:id` | `GET`, `PATCH` | Detalle de la conciliación y acciones de enlace, descarte, aprobación o rechazo. |
 | `/api/cuentas-bancarias` | `GET`, `POST` | Consulta y crea cuentas bancarias institucionales. |
-| `/api/cuentas-bancarias/:numeroCuenta` | `PATCH` | Actualiza nombre, moneda o estado de una cuenta bancaria. |
+| `/api/cuentas-bancarias/:numeroCuenta` | `PATCH` | Actualiza nombre, moneda o estado de una cuenta bancaria; rechaza el cambio de moneda si ya tiene minutas o estados de cuenta. |
+| `/api/tasas-cambio` | `GET`, `POST` | Consulta el catálogo de tasas USD → NIO o registra la tasa de una fecha. |
+| `/api/tasas-cambio/:id` | `PATCH` | Corrige una tasa ya catalogada (no recalcula movimientos que ya la aplicaron). |
 | `/api/configuracion` | `GET`, `PUT` | Consulta y edita la configuración institucional. |
 | `/api/catalogo/cuentas` | `GET`, `POST` | Consulta y crea cuentas contables. |
 | `/api/catalogo/cuentas/:codigo` | `PATCH` | Actualiza cuenta contable, estado o uso en movimientos. |
@@ -244,19 +293,42 @@ pnpm test
 ```
 
 `pnpm test` compila el proyecto y ejecuta las pruebas de `tests/`: renderizado del acceso, ausencia de datos
-de muestra en los archivos de ejecución, verificación de que todo módulo del menú tiene pantalla conectada y
-comprobación de que la carga bancaria persiste líneas y de que conciliación y configuración exigen permisos.
+de muestra en los archivos de ejecución, verificación de que todo módulo del menú tiene pantalla conectada,
+comprobación de que la carga bancaria persiste líneas y de que conciliación y configuración exigen permisos,
+y las pruebas de comportamiento de `lib/moneda.ts` y `lib/movimientos.ts` (aritmética decimal exacta,
+identificación del importe que afecta al banco, bloqueo por tasa faltante).
+
+`pnpm test:db` ejecuta además `tests/banco-moneda.test.mjs` contra una base PostgreSQL real (usa
+`DATABASE_URL` de `.dev.vars`; requiere haber aplicado las migraciones con `pnpm db:migrate`). No corre
+dentro de `pnpm test` porque, a diferencia del resto de la suite, necesita una base de datos disponible.
+Cubre con datos reales: USD 100 × tasa 36.50 = NIO 3650.00; dos minutas de USD 100 con tasas distintas
+conciliando cada una por USD 100 exactos (no por su distinto equivalente en NIO); rechazo de tasas
+inválidas; bloqueo de cambio de moneda de una cuenta con movimientos; el `CHECK` de la base de datos
+rechazando un monto que no cuadra con `importeOriginal × tasa`; líneas USD históricas sin tasa quedando
+pendientes y bloqueadas para enlace hasta completarse; que corregir el catálogo de tasas no altera un
+movimiento ya registrado; y dos regresiones NIO (cuenta NIO normal, y una minuta legada sin ninguna línea
+marcada como bancaria).
+
+Verificado además manualmente en el navegador (login, creación de cuenta USD, registro de tasa, captura de
+minuta USD con cálculo NIO en vivo, carga de estado de cuenta, conciliación automática por importe
+original, aprobación, y bloqueo de cambio de moneda) contra PostgreSQL real.
 
 Pendiente para producción, en orden de prioridad:
 
 1. **Pruebas del intérprete bancario con archivos reales de cada banco.** `lib/banco.ts` cubre los encabezados
    más comunes, pero cada banco publica su propio formato; valide un archivo real por banco antes de operar.
-2. **Conversión de moneda para cuentas en USD.** El sistema opera en córdobas; una cuenta bancaria en USD se
-   concilia contra minutas registradas en córdobas sin aplicar tipo de cambio.
-3. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
-4. **Restricción de partida doble en base de datos.** Hoy el cuadre se valida en la interfaz y en la API, no
+2. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
+3. **Restricción de partida doble en base de datos.** Hoy el cuadre se valida en la interfaz y en la API, no
    como restricción de PostgreSQL.
-7. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
+4. **Valoración cambiaria de cierre.** Ver "Cuentas bancarias en USD" arriba: la política contable para
+   reconocer la diferencia cambiaria al cierre queda pendiente de definir; el sistema no genera asientos
+   automáticos.
+5. **Interpretación de fechas en la carga de estados de cuenta.** Se detectó, fuera del alcance de este
+   cambio, que `lib/banco.ts` puede interpretar mal una fecha en formato `AAAA-MM-DD` dentro de un CSV
+   (el analizador de hojas de cálculo la reordena antes de llegar al parser propio de fechas); el formato
+   `DD/MM/AAAA` documentado arriba no presenta el problema. Revisar antes de depender de fechas ISO en
+   estados de cuenta.
+6. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
 
 ## Soporte
 

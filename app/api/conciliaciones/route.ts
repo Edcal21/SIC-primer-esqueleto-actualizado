@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       reporteId: conciliacionesBancarias.reporteId,
       cuentaBancariaNumero: conciliacionesBancarias.cuentaBancariaNumero,
       cuentaBancariaNombre: cuentasBancarias.nombre,
+      cuentaBancariaMoneda: cuentasBancarias.moneda,
       periodo: conciliacionesBancarias.periodo,
       estado: conciliacionesBancarias.estado,
       totalBanco: conciliacionesBancarias.totalBanco,

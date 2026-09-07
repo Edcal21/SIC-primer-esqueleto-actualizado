@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
 import { registrarAdvertenciaSegregacionConciliacion, registrarAuditoria } from "../../../../lib/auditoria";
-import { movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
+import { estaPendienteDeTasa, movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
 
 type AccionConciliacion = "conciliar" | "descartar" | "reabrir" | "aprobar" | "rechazar";
@@ -83,6 +83,12 @@ async function actualizarLinea(
   if (!linea) return jsonError("Línea bancaria no encontrada en este reporte", 404);
 
   if (accion === "conciliar") {
+    if (estaPendienteDeTasa(linea)) {
+      return jsonError(
+        "Esta línea es de una cuenta USD y no tiene tasa de cambio registrada para su fecha; está pendiente de completar. Registre la tasa del día en Configuración → Tasas de cambio y vuelva a intentar.",
+        409,
+      );
+    }
     const movimientoId = body.movimientoId?.trim();
     if (!movimientoId) return jsonError("Seleccione el movimiento contable a enlazar", 400);
     const [movimiento] = await db.select().from(movimientosCuentas).where(eq(movimientosCuentas.id, movimientoId)).limit(1);

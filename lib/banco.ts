@@ -1,7 +1,9 @@
-import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import type { getDb } from "../db";
 import { conciliacionesBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../db/schema";
+import { calcularEquivalenteNio, sumarMontos } from "./moneda";
+import { obtenerTasaVigente } from "./tasas";
 
 type Db = ReturnType<typeof getDb>;
 type SheetRow = unknown[];
@@ -21,12 +23,30 @@ export type LineaEstadoBancario = {
   saldo: string | null;
 };
 
+/** Línea del estado de cuenta lista para insertar, con la moneda de la cuenta bancaria y, cuando
+ *  hay tasa registrada en el catálogo para su fecha, el equivalente en NIO. Nunca convierte todo
+ *  un estado de cuenta con una tasa única: cada línea resuelve su propia tasa por fecha. */
+export type LineaEstadoBancarioConMoneda = LineaEstadoBancario & {
+  moneda: "USD" | "NIO";
+  tasaCambio: string | null;
+  debitoNio: string | null;
+  creditoNio: string | null;
+};
+
 export type MovimientoConciliable = {
   id: string;
   fecha: string;
   referencia: string | null;
   concepto: string;
+  /** Equivalente en NIO (para reportes históricos). */
   monto: number;
+  /** Importe en la moneda original de la cuenta bancaria: es lo que debe compararse contra el
+   *  estado de cuenta, nunca la suma de todos los débitos de la minuta. */
+  montoOriginal: number;
+  moneda: "USD" | "NIO";
+  /** false = minuta histórica sin ninguna línea marcada como "afecta la cuenta bancaria"; se
+   *  conserva el cálculo legado (suma de débitos en NIO) sin inventar una moneda ni una tasa. */
+  completo: boolean;
   lineaId: string | null;
 };
 
@@ -172,6 +192,32 @@ export async function leerEstadoBancario(archivo: File): Promise<LineaEstadoBanc
   return extraerLineas(filasConEncabezado(rows));
 }
 
+/**
+ * Adjunta a cada línea del estado de cuenta la moneda de la cuenta bancaria y, cuando existe tasa
+ * registrada en el catálogo para su fecha, el equivalente en NIO. Cada línea resuelve su propia
+ * tasa por fecha: nunca se convierte todo el estado de cuenta con una tasa única. Si la cuenta es
+ * USD y la fecha no tiene tasa catalogada (o la línea no trae fecha), la línea queda "pendiente de
+ * completar": se guarda igual, pero no podrá enlazarse ni aprobarse hasta completar la tasa.
+ */
+export async function construirLineasConMoneda(db: Db, lineas: LineaEstadoBancario[], moneda: "USD" | "NIO"): Promise<LineaEstadoBancarioConMoneda[]> {
+  if (moneda === "NIO") {
+    return lineas.map(linea => ({ ...linea, moneda, tasaCambio: "1.000000", debitoNio: linea.debito, creditoNio: linea.credito }));
+  }
+
+  const fechas = [...new Set(lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)))];
+  const tasasPorFecha = new Map<string, string>();
+  await Promise.all(fechas.map(async fecha => {
+    const tasa = await obtenerTasaVigente(db, fecha);
+    if (tasa) tasasPorFecha.set(fecha, tasa.tasa);
+  }));
+
+  return lineas.map(linea => {
+    const tasa = linea.fecha ? tasasPorFecha.get(linea.fecha) : undefined;
+    if (!tasa) return { ...linea, moneda, tasaCambio: null, debitoNio: null, creditoNio: null };
+    return { ...linea, moneda, tasaCambio: tasa, debitoNio: calcularEquivalenteNio(linea.debito, tasa), creditoNio: calcularEquivalenteNio(linea.credito, tasa) };
+  });
+}
+
 export function resumenEstadoBancario(lineas: LineaEstadoBancario[]) {
   const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
   const totalDebitos = lineas.reduce((total, linea) => total + Number(linea.debito), 0);
@@ -202,35 +248,96 @@ export async function movimientosConciliables(db: Db, cuentaBancariaNumero: stri
 
   if (!movimientos.length) return [];
   const ids = movimientos.map(movimiento => movimiento.id);
-  const [totales, enlazadas] = await Promise.all([
+  const [detalles, enlazadas] = await Promise.all([
     db.select({
       movimientoId: detallesMovimientos.movimientoId,
-      total: sql<string>`coalesce(sum(${detallesMovimientos.monto}) filter (where ${detallesMovimientos.tipo} = 'debito'), 0)`,
-    }).from(detallesMovimientos).where(inArray(detallesMovimientos.movimientoId, ids)).groupBy(detallesMovimientos.movimientoId),
+      tipo: detallesMovimientos.tipo,
+      monto: detallesMovimientos.monto,
+      montoOriginal: detallesMovimientos.montoOriginal,
+      moneda: detallesMovimientos.moneda,
+      afectaCuentaBancaria: detallesMovimientos.afectaCuentaBancaria,
+    }).from(detallesMovimientos).where(inArray(detallesMovimientos.movimientoId, ids)),
     db.select({ id: lineasReporteBancario.id, movimientoId: lineasReporteBancario.movimientoId })
       .from(lineasReporteBancario).where(inArray(lineasReporteBancario.movimientoId, ids)),
   ]);
 
-  const montoPorMovimiento = new Map(totales.map(fila => [fila.movimientoId, Number(fila.total)]));
+  const detallesPorMovimiento = new Map<string, typeof detalles>();
+  for (const fila of detalles) {
+    const lista = detallesPorMovimiento.get(fila.movimientoId) ?? [];
+    lista.push(fila);
+    detallesPorMovimiento.set(fila.movimientoId, lista);
+  }
   const lineaPorMovimiento = new Map(enlazadas.filter(fila => fila.movimientoId).map(fila => [fila.movimientoId as string, fila.id]));
-  return movimientos.map(movimiento => ({
-    ...movimiento,
-    monto: montoPorMovimiento.get(movimiento.id) ?? 0,
-    lineaId: lineaPorMovimiento.get(movimiento.id) ?? null,
-  }));
+
+  return movimientos.map(movimiento => {
+    const lineasDetalle = detallesPorMovimiento.get(movimiento.id) ?? [];
+    const marcadas = lineasDetalle.filter(fila => fila.afectaCuentaBancaria);
+    const lineaId = lineaPorMovimiento.get(movimiento.id) ?? null;
+
+    if (marcadas.length) {
+      return {
+        ...movimiento,
+        monto: Number(sumarMontos(marcadas.map(fila => fila.monto))),
+        montoOriginal: Number(sumarMontos(marcadas.map(fila => fila.montoOriginal))),
+        moneda: marcadas[0].moneda,
+        completo: true,
+        lineaId,
+      };
+    }
+
+    // Minuta histórica sin línea marcada: se conserva el cálculo legado (suma de débitos en NIO)
+    // sin inventar una moneda ni una tasa para un registro que nunca las capturó.
+    const legado = Number(sumarMontos(lineasDetalle.filter(fila => fila.tipo === "debito").map(fila => fila.monto)));
+    return { ...movimiento, monto: legado, montoOriginal: legado, moneda: "NIO" as const, completo: false, lineaId };
+  });
 }
 
 const mismoMonto = (linea: { debito: string; credito: string }, movimiento: MovimientoConciliable) =>
-  Math.abs(Math.abs(Number(linea.credito) - Number(linea.debito)) - movimiento.monto) < 0.01;
+  Math.abs(Math.abs(Number(linea.credito) - Number(linea.debito)) - movimiento.montoOriginal) < 0.01;
+
+/** Una línea USD sin tasa registrada para su fecha está pendiente de completar: no se infiere el
+ *  valor y se bloquea su enlace (automático o manual) hasta que se complete. */
+export const estaPendienteDeTasa = (linea: { moneda: string; tasaCambio: string | null }) =>
+  linea.moneda === "USD" && linea.tasaCambio === null;
+
+/**
+ * Intenta completar, con el catálogo vigente, las líneas de un reporte que quedaron pendientes de
+ * tasa (cuenta USD sin tasa registrada para su fecha al momento de la carga). Nunca inventa una
+ * tasa: solo aplica una que ya exista en el catálogo para la fecha exacta de la línea. Se puede
+ * llamar cuantas veces sea necesario; es un no-op para las líneas que ya están completas.
+ */
+export async function completarLineasPendientesDeTasa(db: Db, reporteId: string): Promise<number> {
+  const pendientes = await db.select().from(lineasReporteBancario)
+    .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.moneda, "USD"), isNull(lineasReporteBancario.tasaCambio)));
+  const conFecha = pendientes.filter((linea): linea is typeof linea & { fecha: string } => Boolean(linea.fecha));
+  if (!conFecha.length) return 0;
+
+  let completadas = 0;
+  for (const linea of conFecha) {
+    const tasa = await obtenerTasaVigente(db, linea.fecha);
+    if (!tasa) continue;
+    await db.update(lineasReporteBancario).set({
+      tasaCambio: tasa.tasa,
+      debitoNio: calcularEquivalenteNio(linea.debito, tasa.tasa),
+      creditoNio: calcularEquivalenteNio(linea.credito, tasa.tasa),
+    }).where(eq(lineasReporteBancario.id, linea.id));
+    completadas += 1;
+  }
+  return completadas;
+}
 
 /**
  * Enlaza automáticamente las líneas del estado bancario con movimientos contables cuando existe
- * una sola coincidencia por monto (y fecha, cuando el estado la trae). Nunca decide entre empates.
+ * una sola coincidencia por monto original (en la moneda de la cuenta) y fecha, cuando el estado
+ * la trae. Nunca decide entre empates ni enlaza líneas USD pendientes de completar su tasa.
  */
 export async function autoConciliar(db: Db, reporteId: string, cuentaBancariaNumero: string, usuarioId: string) {
-  const lineas = await db.select().from(lineasReporteBancario)
+  await completarLineasPendientesDeTasa(db, reporteId);
+
+  const todasLasPendientes = await db.select().from(lineasReporteBancario)
     .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.estadoConciliacion, "pendiente")))
     .orderBy(asc(lineasReporteBancario.numeroLinea));
+  const lineas = todasLasPendientes.filter(linea => !estaPendienteDeTasa(linea));
   if (!lineas.length) return 0;
 
   const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
@@ -255,10 +362,14 @@ export async function autoConciliar(db: Db, reporteId: string, cuentaBancariaNum
   return conciliadas;
 }
 
-/** Recalcula los totales de la conciliación a partir de las líneas y de los movimientos del período. */
+/** Recalcula los totales de la conciliación a partir de las líneas y de los movimientos del período.
+ *  Los totales quedan expresados en la moneda original de la cuenta bancaria (nunca se mezclan
+ *  monedas ni se convierte todo el estado con una tasa única). */
 export async function recalcularConciliacion(db: Db, conciliacionId: string) {
   const [conciliacion] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.id, conciliacionId)).limit(1);
   if (!conciliacion) return null;
+
+  await completarLineasPendientesDeTasa(db, conciliacion.reporteId);
 
   const lineas = await db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId));
   const neto = (linea: typeof lineas[number]) => Number(linea.credito) - Number(linea.debito);

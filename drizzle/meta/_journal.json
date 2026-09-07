@@ -148,6 +148,13 @@
       "when": 1788768000000,
       "tag": "0020_partida_doble_unique_minuta",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788771600000,
+      "tag": "0021_moneda_usd_nio",
+      "breakpoints": true
     }
   ]
 }

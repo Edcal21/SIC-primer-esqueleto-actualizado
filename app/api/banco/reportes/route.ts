@@ -2,7 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, reportesBancarios } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
-import { leerEstadoBancario, resumenEstadoBancario, type LineaEstadoBancario } from "../../../../lib/banco";
+import { construirLineasConMoneda, leerEstadoBancario, resumenEstadoBancario, type LineaEstadoBancario } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { verificarRateLimit } from "../../../../lib/security";
 
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   if (!/\.(csv|xlsx|xls)$/i.test(archivo.name)) return jsonError("Formato no permitido; use CSV o Excel", 415);
 
   const db = getDb();
-  const [cuenta] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta, nombre: cuentasBancarias.nombre })
+  const [cuenta] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta, nombre: cuentasBancarias.nombre, moneda: cuentasBancarias.moneda })
     .from(cuentasBancarias)
     .where(and(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa")))
     .limit(1);
@@ -101,6 +101,11 @@ export async function POST(request: Request) {
   }
 
   const resumen = resumenEstadoBancario(lineas);
+  // Cada línea resuelve su propia tasa por fecha en el catálogo; nunca se convierte todo el
+  // estado de cuenta con una tasa única. Las líneas USD sin tasa registrada para su fecha quedan
+  // guardadas como pendientes de completar (nunca se infiere el valor).
+  const lineasConMoneda = await construirLineasConMoneda(db, lineas, cuenta.moneda);
+  const pendientesDeTasa = lineasConMoneda.filter(linea => linea.moneda === "USD" && linea.tasaCambio === null).length;
 
   try {
     const reporte = await db.transaction(async tx => {
@@ -119,20 +124,24 @@ export async function POST(request: Request) {
         totalCreditos: resumen.totalCreditos,
       }).returning();
 
-      await tx.insert(lineasReporteBancario).values(lineas.map(linea => ({ ...linea, reporteId: creado.id })));
+      await tx.insert(lineasReporteBancario).values(lineasConMoneda.map(linea => ({ ...linea, reporteId: creado.id })));
       await registrarAuditoria(tx, {
         user,
         modulo: "Bancos",
         accion: "Procesó reporte bancario",
         entidad: "reportes_bancarios",
         entidadId: creado.id,
-        detalle: `${archivo.name} · ${cuenta.nombre} · ${resumen.totalLineas} líneas · débitos ${resumen.totalDebitos} · créditos ${resumen.totalCreditos}`,
+        detalle: `${archivo.name} · ${cuenta.nombre} · ${resumen.totalLineas} líneas · débitos ${resumen.totalDebitos} · créditos ${resumen.totalCreditos}`
+          + (pendientesDeTasa ? ` · ${pendientesDeTasa} líneas pendientes de tasa USD` : ""),
       });
 
       return creado;
     });
 
-    return Response.json({ reporte: { ...serializar(reporte), conciliacionId: null, conciliacionEstado: null } }, { status: 201, headers: { "Cache-Control": "no-store" } });
+    return Response.json({
+      reporte: { ...serializar(reporte), conciliacionId: null, conciliacionEstado: null },
+      pendientesDeTasa,
+    }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Bank report upload failed", error);
     return jsonError("No se pudo guardar el reporte bancario", 500);
