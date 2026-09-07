@@ -3,6 +3,7 @@ import { env as workerEnv } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { rolesPermisos, usuarios as usuariosTable } from "../db/schema";
+import { jsonSeguro } from "./security";
 
 export type RolId = "administrador" | "contador_general" | "operador_bancario" | "auditor_general";
 export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
@@ -164,4 +165,4 @@ export async function usuarioDesdeRequest(request: Request): Promise<UsuarioSesi
 }
 
 export function puede(user: UsuarioSesion, permiso: Permiso) { return user.permisos.includes(permiso); }
-export function jsonError(message: string, status: number) { return Response.json({ error: message }, { status }); }
+export function jsonError(message: string, status: number) { return jsonSeguro({ error: message }, { status }); }

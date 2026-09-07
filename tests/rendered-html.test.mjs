@@ -79,9 +79,10 @@ test("bank statements and reconciliation persist to PostgreSQL", async () => {
 });
 
 test("production auth configuration fails closed", async () => {
-  const [auth, login, envExample] = await Promise.all([
+  const [auth, login, security, envExample] = await Promise.all([
     readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/security.ts", import.meta.url), "utf8"),
     readFile(new URL("../.dev.vars.example", import.meta.url), "utf8"),
   ]);
 
@@ -90,8 +91,22 @@ test("production auth configuration fails closed", async () => {
   assert.match(auth, /esProduccion\(\) \? "; Secure" : ""/, "la cookie de sesión debe ser Secure en producción");
   assert.match(auth, /SIC_SESSION_SECRET no está configurado/, "producción debe exigir SIC_SESSION_SECRET");
   assert.match(login, /problemaConfiguracionSeguridad/, "el login debe rechazar una configuración insegura");
+  assert.match(login, /verificarRateLimit/, "el login debe limitar intentos repetidos");
+  assert.match(security, /X-Frame-Options/, "las respuestas protegidas deben bloquear iframes");
+  assert.match(security, /Content-Security-Policy/, "las respuestas protegidas deben incluir CSP");
+  assert.match(security, /status: 429/, "el rate limit debe responder 429 cuando se excede");
   assert.match(envExample, /SIC_ENTORNO/);
   assert.match(envExample, /SIC_SESSION_SECRET/);
+});
+
+test("sensitive uploads are rate limited", async () => {
+  const [bankUpload, balanceUpload] = await Promise.all([
+    readFile(new URL("../app/api/banco/reportes/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/importaciones/balanza/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(bankUpload, /verificarRateLimit/, "la carga bancaria debe limitar intentos por IP");
+  assert.match(balanceUpload, /verificarRateLimit/, "la importación de balanza debe limitar intentos por IP");
 });
 
 test("movement annulment preserves accounting detail", async () => {

@@ -4,6 +4,7 @@ import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, repor
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { leerEstadoBancario, resumenEstadoBancario, type LineaEstadoBancario } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
+import { verificarRateLimit } from "../../../../lib/security";
 
 const serializar = (row: typeof reportesBancarios.$inferSelect) => ({
   id: row.id,
@@ -45,6 +46,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const limited = verificarRateLimit(request, { keyPrefix: "banco:reportes", limit: 12, windowMs: 60_000 });
+  if (limited) return limited;
+
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
   if (!puede(user, "banco:cargar")) return jsonError("No tiene permiso para cargar reportes bancarios", 403);

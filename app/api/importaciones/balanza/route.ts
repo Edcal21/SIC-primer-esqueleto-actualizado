@@ -4,6 +4,7 @@ import { getDb } from "../../../../db";
 import { cuentasContables, importacionesBalanza, lineasBalanza } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
+import { verificarRateLimit } from "../../../../lib/security";
 
 type RawRow = Record<string, unknown>;
 type SheetRow = unknown[];
@@ -124,6 +125,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const limited = verificarRateLimit(request, { keyPrefix: "importaciones:balanza", limit: 10, windowMs: 60_000 });
+  if (limited) return limited;
+
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
   if (!puede(user, "importaciones:administrar")) return jsonError("No tiene permiso para importar balanza de comprobación", 403);
