@@ -3,7 +3,6 @@ import { getDb } from "../../../../db";
 import { cuentasContables, importacionesBalanza, lineasBalanza } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
-import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../../lib/periodos";
 import { verificarRateLimit } from "../../../../lib/security";
 import { leerBalanza, type BalanzaProcesada } from "../../../../lib/balanza";
 
@@ -48,14 +47,8 @@ export async function POST(request: Request) {
 
   if (!(archivo instanceof File) || !archivo.name) return jsonError("Seleccione un archivo de balanza", 400);
   if (!periodoRegex.test(periodo)) return jsonError("Período inválido; use formato YYYY-MM", 400);
-
   if (archivo.size > 10 * 1024 * 1024) return jsonError("El archivo supera el límite de 10 MB", 413);
   if (!/\.(csv|xlsx|xls)$/i.test(archivo.name)) return jsonError("Formato no permitido; use CSV o Excel", 415);
-
-  const db = getDb();
-  // Importar una balanza reescribe los saldos del período: se rechaza si ya está cerrado.
-  const periodoCerrado = await primerPeriodoCerrado(db, [periodo]);
-  if (periodoCerrado) return jsonError(mensajePeriodoCerrado(periodoCerrado), 409);
 
   let balanza: BalanzaProcesada;
   try {
@@ -67,6 +60,7 @@ export async function POST(request: Request) {
   const { filas, totalDebe, totalHaber } = balanza;
   const diferencia = totalDebe - totalHaber;
   const estado = Math.abs(diferencia) < 0.01 ? "procesado" : "con_diferencias";
+  const db = getDb();
 
   try {
     const result = await db.transaction(async tx => {

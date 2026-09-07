@@ -18,7 +18,6 @@ const Importaciones = lazy(() => import("./modules/Importaciones"));
 const Reportes = lazy(() => import("./modules/Reportes"));
 const Auditoria = lazy(() => import("./modules/Auditoria"));
 const ConfiguracionInstitucional = lazy(() => import("./modules/ConfiguracionInstitucional"));
-const CierreContable = lazy(() => import("./modules/CierreContable"));
 const ModuleFallback = lazy(() => import("./modules/ModuleFallback"));
 
 function ModuleLoading() {
@@ -82,7 +81,6 @@ export default function Home() {
       case "Importaciones": return <Importaciones notify={notify}/>;
       case "Reportes": return <Reportes canDownload={can("reportes:descargar")}/>;
       case "Auditoría": return <Auditoria/>;
-      case "Cierre contable": return <CierreContable notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Configuración": return <ConfiguracionInstitucional config={config} onSaved={setConfig} notify={notify}/>;
       default: return <ModuleFallback nombre={active} user={currentUser}/>;
     }

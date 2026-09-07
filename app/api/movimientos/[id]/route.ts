@@ -1,5 +1,3 @@
-import { conBloqueoConciliacion, esConflictoContable } from "../../../../lib/conciliacion-lock";
-import { verificarPeriodosAbiertos } from "../../../../lib/periodos";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { conciliacionesBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../../../../db/schema";
@@ -32,56 +30,49 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const db = getDb();
   try {
-    return await conBloqueoConciliacion(db, async db => {
-      const [movimiento] = await db.select().from(movimientosCuentas).where(eq(movimientosCuentas.id, id)).limit(1);
-      if (!movimiento) return jsonError("Movimiento no encontrado", 404);
-      if (movimiento.estado === "anulado") return jsonError("El movimiento ya está anulado", 409);
+    const [movimiento] = await db.select().from(movimientosCuentas).where(eq(movimientosCuentas.id, id)).limit(1);
+    if (!movimiento) return jsonError("Movimiento no encontrado", 404);
+    if (movimiento.estado === "anulado") return jsonError("El movimiento ya está anulado", 409);
 
-      // La minuta pertenece al período de su fecha: si ese período está cerrado, anularla lo alteraría.
-      const bloqueo = await verificarPeriodosAbiertos(db, [movimiento.fecha]);
-      if (bloqueo) return jsonError(bloqueo.mensaje, 409);
+    const [enlace] = await db.select({
+      lineaId: lineasReporteBancario.id,
+      numeroLinea: lineasReporteBancario.numeroLinea,
+      conciliacionEstado: conciliacionesBancarias.estado,
+      periodo: conciliacionesBancarias.periodo,
+    })
+      .from(lineasReporteBancario)
+      .leftJoin(conciliacionesBancarias, eq(conciliacionesBancarias.reporteId, lineasReporteBancario.reporteId))
+      .where(eq(lineasReporteBancario.movimientoId, id))
+      .limit(1);
 
-      const [enlace] = await db.select({
-        lineaId: lineasReporteBancario.id,
-        numeroLinea: lineasReporteBancario.numeroLinea,
-        conciliacionEstado: conciliacionesBancarias.estado,
-        periodo: conciliacionesBancarias.periodo,
-      })
-        .from(lineasReporteBancario)
-        .leftJoin(conciliacionesBancarias, eq(conciliacionesBancarias.reporteId, lineasReporteBancario.reporteId))
-        .where(eq(lineasReporteBancario.movimientoId, id))
-        .limit(1);
+    if (enlace) {
+      const detalleConciliacion = enlace.periodo ? ` del período ${enlace.periodo}` : "";
+      return jsonError(
+        `El movimiento está enlazado a la línea ${enlace.numeroLinea} de una conciliación bancaria${detalleConciliacion}. Deshaga el enlace en la pantalla de conciliación antes de anularlo.`,
+        409,
+      );
+    }
 
-      if (enlace) {
-        const detalleConciliacion = enlace.periodo ? ` del período ${enlace.periodo}` : "";
-        return jsonError(
-          `El movimiento está enlazado a la línea ${enlace.numeroLinea} de una conciliación bancaria${detalleConciliacion}. Deshaga el enlace en la pantalla de conciliación antes de anularlo.`,
-          409,
-        );
-      }
+    const detalles = await db.select({ tipo: detallesMovimientos.tipo, monto: detallesMovimientos.monto })
+      .from(detallesMovimientos).where(eq(detallesMovimientos.movimientoId, id));
+    const total = detalles.filter(detalle => detalle.tipo === "debito").reduce((suma, detalle) => suma + Number(detalle.monto), 0);
 
-      const detalles = await db.select({ tipo: detallesMovimientos.tipo, monto: detallesMovimientos.monto })
-        .from(detallesMovimientos).where(eq(detallesMovimientos.movimientoId, id));
-      const total = detalles.filter(detalle => detalle.tipo === "debito").reduce((suma, detalle) => suma + Number(detalle.monto), 0);
+    const [anulado] = await db.update(movimientosCuentas)
+      .set({ estado: "anulado" })
+      .where(eq(movimientosCuentas.id, id))
+      .returning();
 
-      const [anulado] = await db.update(movimientosCuentas)
-        .set({ estado: "anulado" })
-        .where(eq(movimientosCuentas.id, id))
-        .returning();
-
-      await registrarAuditoria(db, {
-        user,
-        modulo: "Minutas",
-        accion: "Anuló movimiento contable",
-        entidad: "movimientos_cuentas",
-        entidadId: id,
-        detalle: `${movimiento.fecha} · ${movimiento.concepto} · ${total.toFixed(2)} NIO · motivo: ${motivo}`,
-      });
-
-      return Response.json({ movimiento: anulado }, { headers: { "Cache-Control": "no-store" } });
+    await registrarAuditoria(db, {
+      user,
+      modulo: "Minutas",
+      accion: "Anuló movimiento contable",
+      entidad: "movimientos_cuentas",
+      entidadId: id,
+      detalle: `${movimiento.fecha} · ${movimiento.concepto} · ${total.toFixed(2)} NIO · motivo: ${motivo}`,
     });
+
+    return Response.json({ movimiento: anulado }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (esConflictoContable(error)) return jsonError("Conflicto contable: actualice la pantalla y vuelva a intentar", 409);
     console.error("Movement annulment failed", error);
     return jsonError("No se pudo anular el movimiento", 500);
   }

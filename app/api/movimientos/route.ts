@@ -3,11 +3,13 @@ import { getDb } from "../../../db";
 import { cuentasBancarias, detallesMovimientos, iglesias, lineasReporteBancario, movimientosCuentas } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
-import { construirDetallesMovimiento, type DetalleEntrada } from "../../../lib/movimientos";
-import { obtenerTasaVigente } from "../../../lib/tasas";
-import { verificarPeriodosAbiertos } from "../../../lib/periodos";
 
-type DetallePayload = DetalleEntrada;
+type DetallePayload = {
+  tipo?: string;
+  cuentaCodigo?: string;
+  cuentaNombre?: string;
+  monto?: string | number;
+};
 
 type MovimientoPayload = {
   fecha?: string;
@@ -61,23 +63,34 @@ export async function POST(request: Request) {
   if (!iglesiaCodigo) return jsonError("La iglesia es obligatoria", 400);
   if (!cuentaBancariaNumero) return jsonError("La cuenta bancaria es obligatoria", 400);
   if (!concepto) return jsonError("Concepto es obligatorio", 400);
+  if (detalles.length < 2) return jsonError("Debe agregar al menos dos detalles para cumplir partida doble", 400);
+
+  const detallesNormalizados = detalles.map((detalle, index) => ({
+    tipo: detalle.tipo?.trim().toLowerCase(),
+    cuentaCodigo: detalle.cuentaCodigo?.trim(),
+    cuentaNombre: detalle.cuentaNombre?.trim(),
+    monto: String(detalle.monto ?? "").trim(),
+    orden: index + 1,
+  }));
+
+  for (const detalle of detallesNormalizados) {
+    if (detalle.tipo !== "credito" && detalle.tipo !== "debito") return jsonError("Tipo inválido; utilice crédito o débito", 400);
+    if (!detalle.cuentaCodigo || !detalle.cuentaNombre) return jsonError("La cuenta del detalle es obligatoria", 400);
+    const monto = Number(detalle.monto);
+    if (!Number.isFinite(monto) || monto <= 0) return jsonError("El monto debe ser mayor que cero", 400);
+  }
+  const totalDebitos = detallesNormalizados.filter(detalle => detalle.tipo === "debito").reduce((total, detalle) => total + Number(detalle.monto), 0);
+  const totalCreditos = detallesNormalizados.filter(detalle => detalle.tipo === "credito").reduce((total, detalle) => total + Number(detalle.monto), 0);
+  if (Math.abs(totalDebitos - totalCreditos) >= 0.01) return jsonError("La minuta no está cuadrada: el total de débitos debe ser igual al total de créditos", 400);
 
   const db = getDb();
   try {
-    const bloqueo = await verificarPeriodosAbiertos(db, [fecha]);
-    if (bloqueo) return jsonError(bloqueo.mensaje, 409);
-
     const [iglesia] = await db.select({ codigo: iglesias.codigo }).from(iglesias)
       .where(and(eq(iglesias.codigo, iglesiaCodigo), eq(iglesias.estado, "activa"))).limit(1);
     if (!iglesia) return jsonError("La iglesia seleccionada no existe o está inactiva", 400);
-    const [cuentaBancaria] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta, moneda: cuentasBancarias.moneda }).from(cuentasBancarias)
+    const [cuentaBancaria] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta }).from(cuentasBancarias)
       .where(and(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa"))).limit(1);
     if (!cuentaBancaria) return jsonError("La cuenta bancaria seleccionada no existe o está inactiva", 400);
-
-    const tasaUsd = cuentaBancaria.moneda === "USD" ? await obtenerTasaVigente(db, fecha) : null;
-    const resultadoDetalles = construirDetallesMovimiento(detalles, { cuentaBancariaMoneda: cuentaBancaria.moneda, tasaUsd });
-    if (!resultadoDetalles.ok) return jsonError(resultadoDetalles.error, 400);
-    const detallesNormalizados = resultadoDetalles.detalles;
 
     const result = await db.transaction(async tx => {
       const [movimiento] = await tx.insert(movimientosCuentas).values({
@@ -92,15 +105,11 @@ export async function POST(request: Request) {
       const detallesCreados = await tx.insert(detallesMovimientos).values(
         detallesNormalizados.map(detalle => ({
           movimientoId: movimiento.id,
-          tipo: detalle.tipo,
-          cuentaCodigo: detalle.cuentaCodigo,
-          cuentaNombre: detalle.cuentaNombre,
-          monto: detalle.monto,
+          tipo: detalle.tipo as "credito" | "debito",
+          cuentaCodigo: detalle.cuentaCodigo!,
+          cuentaNombre: detalle.cuentaNombre!,
+          monto: Number(detalle.monto).toFixed(2),
           orden: detalle.orden,
-          afectaCuentaBancaria: detalle.afectaCuentaBancaria,
-          moneda: detalle.moneda,
-          montoOriginal: detalle.montoOriginal,
-          tasaCambio: detalle.tasaCambio,
         })),
       ).returning();
       await registrarAuditoria(tx, {

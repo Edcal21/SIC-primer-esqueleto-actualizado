@@ -1,10 +1,7 @@
-import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import type { getDb } from "../db";
-import { conciliacionesBancarias, cuentasBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../db/schema";
-import { conBloqueoConciliacion } from "./conciliacion-lock";
-import { calcularEquivalenteNio, montosIguales, sumarMontos } from "./moneda";
-import { obtenerTasaVigente } from "./tasas";
+import { conciliacionesBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../db/schema";
 
 type Db = ReturnType<typeof getDb>;
 type SheetRow = unknown[];
@@ -24,34 +21,12 @@ export type LineaEstadoBancario = {
   saldo: string | null;
 };
 
-/** Línea del estado de cuenta lista para insertar, con la moneda de la cuenta bancaria y, cuando
- *  hay tasa registrada en el catálogo para su fecha, el equivalente en NIO. Nunca convierte todo
- *  un estado de cuenta con una tasa única: cada línea resuelve su propia tasa por fecha. */
-export type LineaEstadoBancarioConMoneda = LineaEstadoBancario & {
-  moneda: "USD" | "NIO";
-  tasaCambio: string | null;
-  debitoNio: string | null;
-  creditoNio: string | null;
-};
-
 export type MovimientoConciliable = {
   id: string;
   fecha: string;
   referencia: string | null;
   concepto: string;
-  /** Equivalente en NIO (para reportes históricos). */
   monto: number;
-  /** Importe en la moneda original de la cuenta bancaria: es lo que debe compararse contra el
-   *  estado de cuenta, nunca la suma de todos los débitos de la minuta. */
-  montoOriginal: number;
-  moneda: "USD" | "NIO";
-  /** Dirección del efecto sobre la cuenta bancaria: "entrada" cuando la línea marcada es un débito
-   *  a la cuenta de banco (el activo aumenta) y "salida" cuando es un crédito. Es null en las
-   *  minutas históricas sin línea marcada: su dirección nunca se registró y no se infiere. */
-  sentido: "entrada" | "salida" | null;
-  /** false = minuta histórica sin ninguna línea marcada como "afecta la cuenta bancaria"; se
-   *  conserva el cálculo legado (suma de débitos en NIO) sin inventar una moneda ni una tasa. */
-  completo: boolean;
   lineaId: string | null;
 };
 
@@ -89,14 +64,17 @@ export function valorFecha(value: unknown): string | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
   const raw = valorTexto(value);
   if (!raw) return null;
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const local = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
-  if (!iso && !local) return null;
-  // Fechas con separadores locales siempre son día/mes/año, nunca mes/día.
-  const [anio, mes, dia] = iso ? iso.slice(1).map(Number) : [Number(local![3]), Number(local![2]), Number(local![1])];
-  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
-  if (fecha.getUTCFullYear() !== anio || fecha.getUTCMonth() !== mes - 1 || fecha.getUTCDate() !== dia) return null;
-  return fecha.toISOString().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const separado = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (separado) {
+    const [, dia, mes, anioRaw] = separado;
+    const anio = anioRaw.length === 2 ? `20${anioRaw}` : anioRaw;
+    const fecha = new Date(Date.UTC(Number(anio), Number(mes) - 1, Number(dia)));
+    if (Number.isNaN(fecha.getTime())) return null;
+    return fecha.toISOString().slice(0, 10);
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
 function buscarValor(row: RawRow, aliases: string[]) {
@@ -141,9 +119,7 @@ function extraerLineas(hoja: HojaBancaria): LineaEstadoBancario[] {
   const parsed = hoja.filas.map((row, index) => {
     const descripcion = valorTexto(buscarValor(row, headerAliases.descripcion));
     const referencia = valorTexto(buscarValor(row, headerAliases.referencia));
-    const fechaCelda = buscarValor(row, headerAliases.fecha);
-    const fecha = valorFecha(fechaCelda);
-    if (valorTexto(fechaCelda) && !fecha) throw new Error(`Fila ${hoja.primeraFilaDatos + index}: fecha inválida; use AAAA-MM-DD o DD/MM/AAAA`);
+    const fecha = valorFecha(buscarValor(row, headerAliases.fecha));
     const debitoCelda = buscarValor(row, headerAliases.debito);
     const creditoCelda = buscarValor(row, headerAliases.credito);
     const montoCelda = buscarValor(row, headerAliases.monto);
@@ -188,38 +164,12 @@ function extraerLineas(hoja: HojaBancaria): LineaEstadoBancario[] {
 
 export async function leerEstadoBancario(archivo: File): Promise<LineaEstadoBancario[]> {
   const buffer = await archivo.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("El archivo no contiene hojas para procesar");
-  const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
+  const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd" });
   if (!rows.length) throw new Error(`La hoja "${sheetName}" del archivo está vacía`);
   return extraerLineas(filasConEncabezado(rows));
-}
-
-/**
- * Adjunta a cada línea del estado de cuenta la moneda de la cuenta bancaria y, cuando existe tasa
- * registrada en el catálogo para su fecha, el equivalente en NIO. Cada línea resuelve su propia
- * tasa por fecha: nunca se convierte todo el estado de cuenta con una tasa única. Si la cuenta es
- * USD y la fecha no tiene tasa catalogada (o la línea no trae fecha), la línea queda "pendiente de
- * completar": se guarda igual, pero no podrá enlazarse ni aprobarse hasta completar la tasa.
- */
-export async function construirLineasConMoneda(db: Db, lineas: LineaEstadoBancario[], moneda: "USD" | "NIO"): Promise<LineaEstadoBancarioConMoneda[]> {
-  if (moneda === "NIO") {
-    return lineas.map(linea => ({ ...linea, moneda, tasaCambio: "1.000000", debitoNio: linea.debito, creditoNio: linea.credito }));
-  }
-
-  const fechas = [...new Set(lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)))];
-  const tasasPorFecha = new Map<string, string>();
-  await Promise.all(fechas.map(async fecha => {
-    const tasa = await obtenerTasaVigente(db, fecha);
-    if (tasa) tasasPorFecha.set(fecha, tasa.tasa);
-  }));
-
-  return lineas.map(linea => {
-    const tasa = linea.fecha ? tasasPorFecha.get(linea.fecha) : undefined;
-    if (!tasa) return { ...linea, moneda, tasaCambio: null, debitoNio: null, creditoNio: null };
-    return { ...linea, moneda, tasaCambio: tasa, debitoNio: calcularEquivalenteNio(linea.debito, tasa), creditoNio: calcularEquivalenteNio(linea.credito, tasa) };
-  });
 }
 
 export function resumenEstadoBancario(lineas: LineaEstadoBancario[]) {
@@ -252,189 +202,82 @@ export async function movimientosConciliables(db: Db, cuentaBancariaNumero: stri
 
   if (!movimientos.length) return [];
   const ids = movimientos.map(movimiento => movimiento.id);
-  const [detalles, enlazadas] = await Promise.all([
+  const [totales, enlazadas] = await Promise.all([
     db.select({
       movimientoId: detallesMovimientos.movimientoId,
-      tipo: detallesMovimientos.tipo,
-      monto: detallesMovimientos.monto,
-      montoOriginal: detallesMovimientos.montoOriginal,
-      moneda: detallesMovimientos.moneda,
-      afectaCuentaBancaria: detallesMovimientos.afectaCuentaBancaria,
-    }).from(detallesMovimientos).where(inArray(detallesMovimientos.movimientoId, ids)),
+      total: sql<string>`coalesce(sum(${detallesMovimientos.monto}) filter (where ${detallesMovimientos.tipo} = 'debito'), 0)`,
+    }).from(detallesMovimientos).where(inArray(detallesMovimientos.movimientoId, ids)).groupBy(detallesMovimientos.movimientoId),
     db.select({ id: lineasReporteBancario.id, movimientoId: lineasReporteBancario.movimientoId })
       .from(lineasReporteBancario).where(inArray(lineasReporteBancario.movimientoId, ids)),
   ]);
 
-  const detallesPorMovimiento = new Map<string, typeof detalles>();
-  for (const fila of detalles) {
-    const lista = detallesPorMovimiento.get(fila.movimientoId) ?? [];
-    lista.push(fila);
-    detallesPorMovimiento.set(fila.movimientoId, lista);
-  }
+  const montoPorMovimiento = new Map(totales.map(fila => [fila.movimientoId, Number(fila.total)]));
   const lineaPorMovimiento = new Map(enlazadas.filter(fila => fila.movimientoId).map(fila => [fila.movimientoId as string, fila.id]));
-
-  return movimientos.map(movimiento => {
-    const lineasDetalle = detallesPorMovimiento.get(movimiento.id) ?? [];
-    const marcadas = lineasDetalle.filter(fila => fila.afectaCuentaBancaria);
-    const lineaId = lineaPorMovimiento.get(movimiento.id) ?? null;
-
-    if (marcadas.length) {
-      // Un débito a la cuenta de banco aumenta el activo: entra dinero. Un crédito lo disminuye.
-      // construirDetallesMovimiento garantiza que todas las marcadas van en la misma dirección.
-      const sentido = marcadas[0].tipo === "debito" ? "entrada" as const : "salida" as const;
-      return {
-        ...movimiento,
-        monto: Number(sumarMontos(marcadas.map(fila => fila.monto))),
-        montoOriginal: Number(sumarMontos(marcadas.map(fila => fila.montoOriginal))),
-        moneda: marcadas[0].moneda,
-        sentido,
-        completo: true,
-        lineaId,
-      };
-    }
-
-    // Minuta histórica sin línea marcada: se conserva el cálculo legado (suma de débitos en NIO)
-    // sin inventar una moneda ni una tasa para un registro que nunca las capturó. Su dirección
-    // tampoco se conoce (sentido null): el emparejamiento la trata como antes, solo por importe.
-    const legado = Number(sumarMontos(lineasDetalle.filter(fila => fila.tipo === "debito").map(fila => fila.monto)));
-    return { ...movimiento, monto: legado, montoOriginal: legado, moneda: "NIO" as const, sentido: null, completo: false, lineaId };
-  });
+  return movimientos.map(movimiento => ({
+    ...movimiento,
+    monto: montoPorMovimiento.get(movimiento.id) ?? 0,
+    lineaId: lineaPorMovimiento.get(movimiento.id) ?? null,
+  }));
 }
 
-/**
- * Decide si una línea del estado de cuenta y una minuta representan el mismo hecho bancario.
- * Compara tres cosas, y las tres tienen que coincidir:
- *
- * 1. **Moneda**: nunca se cruzan USD con NIO, y una línea USD solo empareja con minutas completas
- *    (las históricas no capturaron su importe en dólares y no se adivina).
- * 2. **Dirección**: un crédito del banco es dinero que entra y solo empareja con una minuta de
- *    entrada; un débito es dinero que sale. Sin esta comprobación un retiro y un depósito del mismo
- *    importe son indistinguibles y el enlace automático puede cruzarlos.
- * 3. **Importe**: en la moneda original y con aritmética decimal exacta, no con tolerancia de punto
- *    flotante (0.03 - 0.02 da 0.00999… en IEEE-754 y colaba importes distintos como iguales).
- *
- * Las minutas históricas sin dirección registrada (`sentido` null) conservan la comparación previa
- * por importe: no se les inventa un sentido para poder ser más estrictos con ellas.
- */
-export const mismoMonto = (linea: { debito: string; credito: string; moneda: string }, movimiento: MovimientoConciliable) => {
-  if (linea.moneda !== movimiento.moneda) return false;
-  if (linea.moneda !== "NIO" && !movimiento.completo) return false;
-
-  const entra = Number(linea.credito) > 0;
-  const sale = Number(linea.debito) > 0;
-  if (movimiento.sentido && ((movimiento.sentido === "entrada" && !entra) || (movimiento.sentido === "salida" && !sale))) return false;
-
-  const importeLinea = entra ? linea.credito : linea.debito;
-  return montosIguales(importeLinea, movimiento.montoOriginal);
-};
-
-/** Una línea USD sin tasa registrada para su fecha está pendiente de completar: no se infiere el
- *  valor y se bloquea su enlace (automático o manual) hasta que se complete. */
-export const estaPendienteDeTasa = (linea: { moneda: string; tasaCambio: string | null }) =>
-  linea.moneda === "USD" && linea.tasaCambio === null;
-
-/**
- * Intenta completar, con el catálogo vigente, las líneas de un reporte que quedaron pendientes de
- * tasa (cuenta USD sin tasa registrada para su fecha al momento de la carga). Nunca inventa una
- * tasa: solo aplica una que ya exista en el catálogo para la fecha exacta de la línea. Se puede
- * llamar cuantas veces sea necesario; es un no-op para las líneas que ya están completas.
- */
-export async function completarLineasPendientesDeTasa(db: Db, reporteId: string): Promise<number> {
-  return conBloqueoConciliacion(db, async db => {
-    const [revision] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.reporteId, reporteId)).limit(1);
-    if (revision && revision.estado !== "borrador") return 0;
-    const pendientes = await db.select().from(lineasReporteBancario)
-      .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.moneda, "USD"), isNull(lineasReporteBancario.tasaCambio)));
-    const conFecha = pendientes.filter((linea): linea is typeof linea & { fecha: string } => Boolean(linea.fecha));
-    if (!conFecha.length) return 0;
-
-    let completadas = 0;
-    for (const linea of conFecha) {
-      const tasa = await obtenerTasaVigente(db, linea.fecha);
-      if (!tasa) continue;
-      await db.update(lineasReporteBancario).set({
-        tasaCambio: tasa.tasa,
-        debitoNio: calcularEquivalenteNio(linea.debito, tasa.tasa),
-        creditoNio: calcularEquivalenteNio(linea.credito, tasa.tasa),
-      }).where(eq(lineasReporteBancario.id, linea.id));
-      completadas += 1;
-    }
-    return completadas;
-  });
-}
+const mismoMonto = (linea: { debito: string; credito: string }, movimiento: MovimientoConciliable) =>
+  Math.abs(Math.abs(Number(linea.credito) - Number(linea.debito)) - movimiento.monto) < 0.01;
 
 /**
  * Enlaza automáticamente las líneas del estado bancario con movimientos contables cuando existe
- * una sola coincidencia por monto original (en la moneda de la cuenta) y fecha, cuando el estado
- * la trae. Nunca decide entre empates ni enlaza líneas USD pendientes de completar su tasa.
+ * una sola coincidencia por monto (y fecha, cuando el estado la trae). Nunca decide entre empates.
  */
 export async function autoConciliar(db: Db, reporteId: string, cuentaBancariaNumero: string, usuarioId: string) {
-  return conBloqueoConciliacion(db, async db => {
-    const [revision] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.reporteId, reporteId)).limit(1);
-    if (revision && revision.estado !== "borrador") return 0;
-    await completarLineasPendientesDeTasa(db, reporteId);
+  const lineas = await db.select().from(lineasReporteBancario)
+    .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.estadoConciliacion, "pendiente")))
+    .orderBy(asc(lineasReporteBancario.numeroLinea));
+  if (!lineas.length) return 0;
 
-    const [cuenta] = await db.select().from(cuentasBancarias).where(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero)).limit(1);
-    if (!cuenta) return 0;
-    const todasLasPendientes = await db.select().from(lineasReporteBancario)
-      .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.estadoConciliacion, "pendiente")))
-      .orderBy(asc(lineasReporteBancario.numeroLinea));
-    const lineas = todasLasPendientes.filter(linea => linea.moneda === cuenta.moneda && !estaPendienteDeTasa(linea));
-    if (!lineas.length) return 0;
+  const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
+  const movimientos = await movimientosConciliables(db, cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
+  const disponibles = movimientos.filter(movimiento => !movimiento.lineaId);
+  const usados = new Set<string>();
+  let conciliadas = 0;
 
-    const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
-    const movimientos = await movimientosConciliables(db, cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
-    const disponibles = movimientos.filter(movimiento => !movimiento.lineaId);
-    const usados = new Set<string>();
-    let conciliadas = 0;
+  for (const linea of lineas) {
+    const candidatos = disponibles.filter(movimiento => !usados.has(movimiento.id)
+      && mismoMonto(linea, movimiento)
+      && (!linea.fecha || movimiento.fecha === linea.fecha));
+    if (candidatos.length !== 1) continue;
+    const [movimiento] = candidatos;
+    await db.update(lineasReporteBancario)
+      .set({ estadoConciliacion: "conciliada", movimientoId: movimiento.id, conciliadoPor: usuarioId, conciliadoEn: new Date() })
+      .where(eq(lineasReporteBancario.id, linea.id));
+    usados.add(movimiento.id);
+    conciliadas += 1;
+  }
 
-    for (const linea of lineas) {
-      const candidatos = disponibles.filter(movimiento => !usados.has(movimiento.id)
-        && mismoMonto(linea, movimiento)
-        && (!linea.fecha || movimiento.fecha === linea.fecha));
-      if (candidatos.length !== 1) continue;
-      const [movimiento] = candidatos;
-      await db.update(lineasReporteBancario)
-        .set({ estadoConciliacion: "conciliada", movimientoId: movimiento.id, conciliadoPor: usuarioId, conciliadoEn: new Date() })
-        .where(eq(lineasReporteBancario.id, linea.id));
-      usados.add(movimiento.id);
-      conciliadas += 1;
-    }
-
-    return conciliadas;
-  });
+  return conciliadas;
 }
 
-/** Recalcula los totales de la conciliación a partir de las líneas y de los movimientos del período.
- *  Los totales quedan expresados en la moneda original de la cuenta bancaria (nunca se mezclan
- *  monedas ni se convierte todo el estado con una tasa única). */
+/** Recalcula los totales de la conciliación a partir de las líneas y de los movimientos del período. */
 export async function recalcularConciliacion(db: Db, conciliacionId: string) {
-  return conBloqueoConciliacion(db, async db => {
-    const [conciliacion] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.id, conciliacionId)).limit(1);
-    if (!conciliacion) return null;
-    if (conciliacion.estado !== "borrador") return conciliacion;
+  const [conciliacion] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.id, conciliacionId)).limit(1);
+  if (!conciliacion) return null;
 
-    await completarLineasPendientesDeTasa(db, conciliacion.reporteId);
+  const lineas = await db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId));
+  const neto = (linea: typeof lineas[number]) => Number(linea.credito) - Number(linea.debito);
+  const totalBanco = lineas.reduce((total, linea) => total + neto(linea), 0);
+  const conciliadas = lineas.filter(linea => linea.estadoConciliacion === "conciliada");
+  const totalConciliado = conciliadas.reduce((total, linea) => total + neto(linea), 0);
+  const pendientes = lineas.filter(linea => linea.estadoConciliacion === "pendiente");
 
-    const lineas = await db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId));
-    const neto = (linea: typeof lineas[number]) => Number(linea.credito) - Number(linea.debito);
-    const totalBanco = lineas.reduce((total, linea) => total + neto(linea), 0);
-    const conciliadas = lineas.filter(linea => linea.estadoConciliacion === "conciliada");
-    const totalConciliado = conciliadas.reduce((total, linea) => total + neto(linea), 0);
-    const pendientes = lineas.filter(linea => linea.estadoConciliacion === "pendiente");
+  const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
+  const movimientos = await movimientosConciliables(db, conciliacion.cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
 
-    const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
-    const movimientos = await movimientosConciliables(db, conciliacion.cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
+  const [actualizada] = await db.update(conciliacionesBancarias).set({
+    totalBanco: totalBanco.toFixed(2),
+    totalConciliado: totalConciliado.toFixed(2),
+    totalPendiente: (totalBanco - totalConciliado).toFixed(2),
+    lineasConciliadas: conciliadas.length,
+    lineasPendientes: pendientes.length,
+    movimientosSinConciliar: movimientos.filter(movimiento => !movimiento.lineaId).length,
+  }).where(eq(conciliacionesBancarias.id, conciliacionId)).returning();
 
-    const [actualizada] = await db.update(conciliacionesBancarias).set({
-      totalBanco: totalBanco.toFixed(2),
-      totalConciliado: totalConciliado.toFixed(2),
-      totalPendiente: (totalBanco - totalConciliado).toFixed(2),
-      lineasConciliadas: conciliadas.length,
-      lineasPendientes: pendientes.length,
-      movimientosSinConciliar: movimientos.filter(movimiento => !movimiento.lineaId).length,
-    }).where(eq(conciliacionesBancarias.id, conciliacionId)).returning();
-
-    return actualizada;
-  });
+  return actualizada;
 }
