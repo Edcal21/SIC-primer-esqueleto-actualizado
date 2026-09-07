@@ -1,13 +1,14 @@
 # Auditoria frontend vs backend
 
-Estado revisado: 2026-09-06.
+Estado revisado: 2026-09-07.
 
 ## Conectado a PostgreSQL
 
 - Autenticacion, sesion, usuarios, roles y permisos.
 - Catalogo contable y actualizacion de cuentas.
 - Iglesias activas usadas en registro de movimientos.
-- Movimientos contables y detalle debito/credito.
+- Movimientos contables y detalle debito/credito, con consulta y anulacion desde la pantalla Minutas.
+- Restablecimiento de contrasenas de usuarios desde la pantalla de administracion.
 - Importaciones de balanza de comprobacion.
 - Reportes financieros generados desde balanzas importadas.
 - Estados de cuenta bancarios: el contenido del archivo se interpreta y cada movimiento se guarda en
@@ -45,12 +46,22 @@ Quien carga y enlaza no aprueba: `banco:cargar` y `conciliacion:aprobar` se otor
 La migracion `0017_conciliacion_bancaria` establece ese reparto inicial y los roles siguen siendo editables
 desde la pantalla de usuarios.
 
+## Endurecimiento de produccion aplicado
+
+- `SIC_ENTORNO=produccion` (o `NODE_ENV=production`) activa tres controles en `lib/auth.ts`:
+  exige `SIC_SESSION_SECRET` de 32 caracteres o mas y distinto del valor de desarrollo,
+  inhabilita el fallback de usuarios locales aunque la bandera este activa, y emite la cookie
+  de sesion con atributo `Secure`.
+- El sistema falla cerrado: si el secreto no sirve, el login responde 503 y ninguna sesion se valida.
+- Las contrasenas sembradas por migracion son publicas y ya pueden rotarse desde la interfaz.
+
 ## Pendiente de conversion
 
-- Pantalla de consulta y anulacion de minutas: `GET /api/movimientos` existe sin interfaz.
 - CRUD completo de iglesias para administradores; hoy se mantienen por migracion.
 - Activar o desactivar reportes desde administracion.
 - Historial de cambios sobre configuracion institucional; hoy solo queda la traza en auditoria.
 - Conversion de moneda para cuentas bancarias en dolares.
 - Retencion del archivo bancario original ademas de sus lineas interpretadas.
 - Parametros contables por periodo, como cierre mensual.
+- Limite de intentos de acceso y encabezados de seguridad (CSP, X-Frame-Options, Referrer-Policy).
+- Restriccion de partida doble como constraint de PostgreSQL, hoy validada en interfaz y API.

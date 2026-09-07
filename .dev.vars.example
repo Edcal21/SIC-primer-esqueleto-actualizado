@@ -1,3 +1,17 @@
 # Copie este archivo como .dev.vars y reemplace la contraseña.
 # Si contiene caracteres especiales, codifíquelos para URL (por ejemplo, @ = %40).
 DATABASE_URL="postgresql://postgres:SU_CONTRASENA@localhost:5432/sic"
+
+# Entorno de ejecución. Use "produccion" en el despliegue real.
+# En producción el sistema exige SIC_SESSION_SECRET, marca la cookie de sesión como Secure
+# (requiere HTTPS) e ignora el fallback de usuarios locales aunque esté activado.
+SIC_ENTORNO="desarrollo"
+
+# Secreto con el que se firman las cookies de sesión. Obligatorio en producción,
+# mínimo 32 caracteres y distinto del valor de desarrollo. Genérelo con:
+#   node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+SIC_SESSION_SECRET=""
+
+# Solo para trabajar sin PostgreSQL disponible. Habilita los usuarios locales de lib/auth.ts.
+# En producción queda inhabilitado aunque valga "true".
+SIC_ALLOW_LOCAL_AUTH_FALLBACK="false"

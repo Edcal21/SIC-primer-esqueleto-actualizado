@@ -77,3 +77,28 @@ test("bank statements and reconciliation persist to PostgreSQL", async () => {
   assert.match(conciliacion, /registrarAuditoria/, "las acciones de conciliación deben auditarse");
   assert.match(configuracion, /puede\(user, "configuracion:administrar"\)/);
 });
+
+test("production auth configuration fails closed", async () => {
+  const [auth, login, envExample] = await Promise.all([
+    readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.dev.vars.example", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(auth, /esProduccion/, "el módulo debe distinguir el entorno de producción");
+  assert.match(auth, /!esProduccion\(\) && leerVariable\("SIC_ALLOW_LOCAL_AUTH_FALLBACK"\)/, "el fallback local debe quedar bloqueado en producción");
+  assert.match(auth, /esProduccion\(\) \? "; Secure" : ""/, "la cookie de sesión debe ser Secure en producción");
+  assert.match(auth, /SIC_SESSION_SECRET no está configurado/, "producción debe exigir SIC_SESSION_SECRET");
+  assert.match(login, /problemaConfiguracionSeguridad/, "el login debe rechazar una configuración insegura");
+  assert.match(envExample, /SIC_ENTORNO/);
+  assert.match(envExample, /SIC_SESSION_SECRET/);
+});
+
+test("movement annulment preserves accounting detail", async () => {
+  const anular = await readFile(new URL("../app/api/movimientos/[id]/route.ts", import.meta.url), "utf8");
+
+  assert.match(anular, /puede\(user, "movimientos:escribir"\)/, "la anulación exige permiso de escritura");
+  assert.match(anular, /estado: "anulado"/, "la anulación solo cambia el estado");
+  assert.match(anular, /registrarAuditoria/, "la anulación debe auditarse");
+  assert.doesNotMatch(anular, /delete\(detallesMovimientos\)|delete\(movimientosCuentas\)/, "la anulación nunca borra el asiento ni su detalle");
+});

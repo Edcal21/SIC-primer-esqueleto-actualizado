@@ -6,6 +6,10 @@ import { conciliacionesBancarias, detallesMovimientos, lineasReporteBancario, mo
 type Db = ReturnType<typeof getDb>;
 type SheetRow = unknown[];
 type RawRow = Record<string, unknown>;
+/** Filas de datos junto al número de fila real del archivo, para que los errores sean ubicables. */
+type HojaBancaria = { filas: RawRow[]; primeraFilaDatos: number };
+
+const MAXIMO_MOVIMIENTOS = 20000;
 
 export type LineaEstadoBancario = {
   numeroLinea: number;
@@ -78,7 +82,7 @@ function buscarValor(row: RawRow, aliases: string[]) {
   return Object.entries(row).find(([key]) => normalizedAliases.includes(normalizarHeader(key)))?.[1];
 }
 
-function filasConEncabezado(rows: SheetRow[]): RawRow[] {
+function filasConEncabezado(rows: SheetRow[]): HojaBancaria {
   const alias = {
     descripcion: headerAliases.descripcion.map(normalizarHeader),
     debito: headerAliases.debito.map(normalizarHeader),
@@ -94,15 +98,25 @@ function filasConEncabezado(rows: SheetRow[]): RawRow[] {
     return tieneDescripcion && tieneMonto;
   });
   if (headerIndex === -1) {
-    throw new Error("No se encontraron encabezados del estado bancario: se requiere una columna de descripción o concepto y otra de débito, crédito o monto");
+    const detectadas = rows.slice(0, 10).flatMap(row => row.map(cell => valorTexto(cell))).filter(Boolean).slice(0, 12);
+    const encontradas = detectadas.length
+      ? ` Columnas leídas en el archivo: ${detectadas.join(", ")}.`
+      : " El archivo no contiene texto en las primeras filas.";
+    throw new Error(
+      "No se reconoció el encabezado del estado bancario. Se necesita una columna de descripción o concepto y otra de débito, crédito o monto."
+      + encontradas,
+    );
   }
 
   const headers = rows[headerIndex].map(cell => valorTexto(cell));
-  return rows.slice(headerIndex + 1).map(row => Object.fromEntries(headers.map((header, index) => [header || `columna_${index + 1}`, row[index] ?? ""])));
+  return {
+    filas: rows.slice(headerIndex + 1).map(row => Object.fromEntries(headers.map((header, index) => [header || `columna_${index + 1}`, row[index] ?? ""]))),
+    primeraFilaDatos: headerIndex + 2,
+  };
 }
 
-function extraerLineas(rows: RawRow[]): LineaEstadoBancario[] {
-  const parsed = rows.map((row, index) => {
+function extraerLineas(hoja: HojaBancaria): LineaEstadoBancario[] {
+  const parsed = hoja.filas.map((row, index) => {
     const descripcion = valorTexto(buscarValor(row, headerAliases.descripcion));
     const referencia = valorTexto(buscarValor(row, headerAliases.referencia));
     const fecha = valorFecha(buscarValor(row, headerAliases.fecha));
@@ -120,14 +134,22 @@ function extraerLineas(rows: RawRow[]): LineaEstadoBancario[] {
     }
     const saldo = saldoCelda === undefined || valorTexto(saldoCelda) === "" ? null : valorMonto(saldoCelda);
 
-    return { numeroLinea: index + 2, fecha, referencia, descripcion, debito, credito, saldo };
+    return { numeroLinea: hoja.primeraFilaDatos + index, fecha, referencia, descripcion, debito, credito, saldo };
   }).filter(row => row.descripcion || row.referencia || row.debito || row.credito);
 
-  if (!parsed.length) throw new Error("El archivo no contiene movimientos bancarios");
-  const invalida = parsed.find(row => !row.descripcion || !Number.isFinite(row.debito) || !Number.isFinite(row.credito) || (row.saldo !== null && !Number.isFinite(row.saldo)));
-  if (invalida) throw new Error(`Fila ${invalida.numeroLinea}: la descripción es obligatoria y los montos deben ser numéricos`);
-  const sinMonto = parsed.find(row => row.debito === 0 && row.credito === 0);
-  if (sinMonto) throw new Error(`Fila ${sinMonto.numeroLinea}: el movimiento no tiene débito ni crédito`);
+  if (!parsed.length) throw new Error("El archivo tiene encabezados válidos pero ninguna fila de movimientos");
+  if (parsed.length > MAXIMO_MOVIMIENTOS) {
+    throw new Error(`El archivo contiene ${parsed.length} movimientos y el máximo admitido por carga es ${MAXIMO_MOVIMIENTOS}; divida el estado de cuenta por período`);
+  }
+
+  for (const fila of parsed) {
+    if (!fila.descripcion) throw new Error(`Fila ${fila.numeroLinea}: falta la descripción o concepto del movimiento`);
+    if (!Number.isFinite(fila.debito)) throw new Error(`Fila ${fila.numeroLinea}: el débito no es un monto numérico válido`);
+    if (!Number.isFinite(fila.credito)) throw new Error(`Fila ${fila.numeroLinea}: el crédito no es un monto numérico válido`);
+    if (fila.saldo !== null && !Number.isFinite(fila.saldo)) throw new Error(`Fila ${fila.numeroLinea}: el saldo no es un monto numérico válido`);
+    if (fila.debito === 0 && fila.credito === 0) throw new Error(`Fila ${fila.numeroLinea}: el movimiento no tiene débito ni crédito`);
+    if (fila.debito > 0 && fila.credito > 0) throw new Error(`Fila ${fila.numeroLinea}: el movimiento trae débito y crédito a la vez; cada línea del estado de cuenta debe tener solo uno`);
+  }
 
   return parsed.map(row => ({
     numeroLinea: row.numeroLinea,
@@ -146,6 +168,7 @@ export async function leerEstadoBancario(archivo: File): Promise<LineaEstadoBanc
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("El archivo no contiene hojas para procesar");
   const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd" });
+  if (!rows.length) throw new Error(`La hoja "${sheetName}" del archivo está vacía`);
   return extraerLineas(filasConEncabezado(rows));
 }
 

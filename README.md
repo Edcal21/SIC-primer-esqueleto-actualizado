@@ -68,15 +68,34 @@ Estas credenciales son exclusivamente de desarrollo. La migración `0002_securit
 
 ## Sesiones y seguridad
 
-- Las contraseñas locales se verifican con PBKDF2-SHA256.
+- Las contraseñas se verifican con PBKDF2-SHA256 (210 000 iteraciones).
 - La sesión se guarda en una cookie `HttpOnly`, `SameSite=Strict`, firmada con HMAC-SHA256 y válida durante ocho horas.
-- En producción configure un secreto aleatorio, único y protegido:
+- En producción la cookie se emite además con el atributo `Secure`, por lo que **el despliegue requiere HTTPS**.
+
+### Configuración obligatoria de producción
+
+Declare el entorno con `SIC_ENTORNO="produccion"` (o `NODE_ENV=production`). Con ese valor el sistema:
+
+1. **Exige `SIC_SESSION_SECRET`**: debe existir, tener al menos 32 caracteres y ser distinto del valor de
+   desarrollo. Si falta o es débil, `POST /api/auth/login` responde 503 con un aviso para el administrador y
+   ninguna sesión existente se valida. El sistema falla cerrado: nunca firma con un secreto inseguro.
+2. **Inhabilita el fallback de usuarios locales** de `lib/auth.ts` aunque `SIC_ALLOW_LOCAL_AUTH_FALLBACK`
+   valga `"true"`. Ese fallback existe solo para trabajar sin PostgreSQL en desarrollo.
+3. **Marca la cookie de sesión como `Secure`**.
+
+Genere el secreto con:
 
 ```bash
-SIC_SESSION_SECRET="un-secreto-largo-y-aleatorio"
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
 ```
 
-No use el secreto de respaldo de `lib/auth.ts` fuera del entorno local. Para producción quedan pendientes HTTPS forzado, rotación de sesiones, monitoreo, respaldos y gestión segura de secretos.
+> **Antes del primer uso real, cambie las contraseñas de los usuarios sembrados.** La migración
+> `0002_security_users_roles` crea `administrador`, `contador`, `banco` y `auditor` con las contraseñas
+> documentadas más arriba, que son públicas. Un administrador puede asignar una contraseña nueva a cualquier
+> usuario desde la pantalla “Usuarios y roles”.
+
+Quedan pendientes en infraestructura: rotación de sesiones, límite de intentos de acceso, encabezados de
+seguridad (CSP, X-Frame-Options), monitoreo, respaldos y gestión de secretos del entorno.
 
 ## Base de datos y catálogo
 
@@ -94,13 +113,51 @@ Compruebe la conexión con la aplicación en ejecución visitando `http://localh
 
 El catálogo puede administrarse desde la pantalla “Catálogo contable”. Además, cada balanza importada crea o actualiza cuentas activas en `cuentas_contables` cuando detecta códigos válidos de 8 dígitos. Los reportes financieros se generan desde las balanzas importadas; si no existe información para el período solicitado, el sistema muestra un mensaje de falta de datos en vez de usar cifras de relleno.
 
+## Minutas contables
+
+La pantalla “Registrar movimiento” crea asientos cuadrados y “Minutas” los consulta. Una minuta errónea se
+**anula**, nunca se borra: `PATCH /api/movimientos/:id` cambia el estado a `anulado` conservando el encabezado
+y todas las líneas de `detalles_movimientos`. La anulación exige el permiso `movimientos:escribir`, un motivo
+de al menos 10 caracteres y queda registrada en auditoría con el monto y el motivo.
+
+Una minuta enlazada a una línea de conciliación bancaria no se puede anular: primero debe deshacerse el enlace
+desde la pantalla de conciliación, para que los totales conciliados nunca queden apuntando a un asiento anulado.
+
 ## Bancos y conciliación bancaria
 
-El estado de cuenta se procesa en el momento de la carga: `lib/banco.ts` interpreta CSV, XLS y XLSX,
-reconoce encabezados en español o inglés (fecha, descripción o concepto, referencia, débito o cargo,
-crédito o abono, monto y saldo) y guarda cada movimiento en `lineas_reporte_bancario`. Si el archivo
-no es legible, el reporte queda registrado con estado `error` y el motivo, y el intento se audita.
-Un archivo con una sola columna de monto se interpreta con el signo: negativo es débito y positivo es crédito.
+El estado de cuenta se procesa en el momento de la carga: `lib/banco.ts` interpreta CSV, XLS y XLSX y
+guarda cada movimiento en `lineas_reporte_bancario`. Si el archivo no es legible, el reporte queda
+registrado con estado `error` y el motivo, y el intento se audita.
+
+### Formato esperado del estado de cuenta
+
+El archivo puede traer filas de título antes de la tabla: el sistema busca la primera fila que funcione como
+encabezado. Los nombres de columna se comparan sin distinguir mayúsculas, acentos ni guiones.
+
+| Columna | Encabezados reconocidos | Obligatoria |
+| --- | --- | --- |
+| Descripción | descripcion, concepto, detalle, transaccion, movimiento, description, narrativa | Sí |
+| Débito | debito, debitos, debe, cargo, cargos, retiro, retiros, salida, salidas, withdrawal | Sí, salvo que exista Monto |
+| Crédito | credito, creditos, haber, abono, abonos, deposito, depositos, entrada, entradas, deposit | Sí, salvo que exista Monto |
+| Monto | monto, importe, valor, amount | Alternativa a Débito/Crédito |
+| Fecha | fecha, fecha operacion, fecha de operacion, fecha movimiento, fecha contable, fecha valor, date | No |
+| Referencia | referencia, numero, no, num, documento, numero documento, comprobante, reference | No |
+| Saldo | saldo, balance, saldo disponible, saldo contable, saldo final | No |
+
+Reglas de interpretación:
+
+- Con una sola columna **Monto**, el signo define el tipo: negativo es débito y positivo es crédito. Se aceptan
+  montos entre paréntesis como negativos, separadores de miles y símbolos de moneda.
+- Con columnas separadas de débito y crédito, **cada fila debe traer solo una de las dos**.
+- Las fechas se aceptan como fecha de Excel, `YYYY-MM-DD` o `DD/MM/AAAA`. Sin columna de fecha el estado se
+  procesa igual, pero el enlace automático con minutas solo podrá compararse por monto.
+- Máximo 10 MB y 20 000 movimientos por carga.
+
+Cuando algo no cuadra, el error indica **el número de fila real del archivo** y qué falló (descripción ausente,
+monto no numérico, fila sin débito ni crédito, fila con ambos). Si no reconoce el encabezado, el mensaje lista
+las columnas que sí leyó, para comparar contra la tabla anterior.
+
+Los formatos varían entre bancos: valide un archivo real de cada banco antes de operar en producción.
 
 La conciliación se genera sobre un estado de cuenta procesado y compara el banco contra las minutas
 registradas en `movimientos_cuentas` para esa misma cuenta bancaria y período:
@@ -151,6 +208,7 @@ tests/               Pruebas automatizadas
 | `/api/auth/me` | `GET` | Devuelve la sesión actual. |
 | `/api/auth/logout` | `POST` | Elimina la sesión. |
 | `/api/movimientos` | `GET`, `POST` | Consulta o registra encabezados y detalles de movimientos. |
+| `/api/movimientos/:id` | `PATCH` | Anula una minuta registrada conservando su detalle contable. |
 | `/api/iglesias` | `GET` | Lista las iglesias activas y sus códigos. |
 | `/api/banco/reportes` | `GET`, `POST` | Consulta el historial y procesa estados de cuenta guardando cada movimiento. |
 | `/api/banco/reportes/:id` | `GET` | Devuelve el estado de cuenta con sus líneas persistidas. |
@@ -188,13 +246,14 @@ Pendiente para producción, en orden de prioridad:
 
 1. **Pruebas del intérprete bancario con archivos reales de cada banco.** `lib/banco.ts` cubre los encabezados
    más comunes, pero cada banco publica su propio formato; valide un archivo real por banco antes de operar.
-2. **Consulta y anulación de minutas desde la interfaz.** `GET /api/movimientos` existe y no tiene pantalla;
-   hoy las minutas se consultan a través de la conciliación y de los reportes.
-3. **CRUD de iglesias desde administración.** Hoy el catálogo de iglesias se mantiene por migración.
-4. **Conversión de moneda para cuentas en USD.** El sistema opera en córdobas; una cuenta bancaria en USD se
+2. **CRUD de iglesias desde administración.** Hoy el catálogo de iglesias se mantiene por migración.
+3. **Conversión de moneda para cuentas en USD.** El sistema opera en córdobas; una cuenta bancaria en USD se
    concilia contra minutas registradas en córdobas sin aplicar tipo de cambio.
-5. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
-6. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
+4. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
+5. **Límite de intentos de acceso y encabezados de seguridad** (CSP, X-Frame-Options, Referrer-Policy).
+6. **Restricción de partida doble en base de datos.** Hoy el cuadre se valida en la interfaz y en la API, no
+   como restricción de PostgreSQL.
+7. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
 
 ## Soporte
 

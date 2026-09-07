@@ -1,4 +1,5 @@
 import { createHmac, pbkdf2Sync, timingSafeEqual } from "node:crypto";
+import { env as workerEnv } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { rolesPermisos, usuarios as usuariosTable } from "../db/schema";
@@ -25,9 +26,46 @@ const usuariosLocales: UsuarioInterno[] = [
 
 const COOKIE = "sic_session";
 const SESSION_SECONDS = 60 * 60 * 8;
-const secret = () => process.env.SIC_SESSION_SECRET ?? "sic-local-development-secret-change-in-production";
+const SECRETO_DESARROLLO = "sic-local-development-secret-change-in-production";
+const SECRETO_LONGITUD_MINIMA = 32;
+
+/** Las variables llegan como binding del worker o por process.env según el entorno de ejecución. */
+function leerVariable(clave: string): string | undefined {
+  let valor: unknown;
+  try { valor = (workerEnv as unknown as Record<string, unknown>)[clave]; } catch { valor = undefined; }
+  if (typeof valor !== "string" || !valor) valor = process.env[clave];
+  return typeof valor === "string" && valor ? valor : undefined;
+}
+
+export function esProduccion() {
+  const entorno = leerVariable("SIC_ENTORNO")?.toLowerCase();
+  if (entorno) return entorno === "produccion" || entorno === "production";
+  return leerVariable("NODE_ENV")?.toLowerCase() === "production";
+}
+
+/**
+ * Devuelve el motivo por el que la configuración de seguridad no sirve para producción,
+ * o null si es válida. En desarrollo nunca bloquea.
+ */
+export function problemaConfiguracionSeguridad(): string | null {
+  if (!esProduccion()) return null;
+  const configurado = leerVariable("SIC_SESSION_SECRET");
+  if (!configurado) return "SIC_SESSION_SECRET no está configurado; el sistema no puede firmar sesiones en producción";
+  if (configurado === SECRETO_DESARROLLO) return "SIC_SESSION_SECRET conserva el valor de desarrollo; genere un secreto aleatorio propio";
+  if (configurado.length < SECRETO_LONGITUD_MINIMA) return `SIC_SESSION_SECRET debe tener al menos ${SECRETO_LONGITUD_MINIMA} caracteres`;
+  return null;
+}
+
+function secret() {
+  const problema = problemaConfiguracionSeguridad();
+  if (problema) throw new Error(problema);
+  return leerVariable("SIC_SESSION_SECRET") ?? SECRETO_DESARROLLO;
+}
+
 const sign = (value: string) => createHmac("sha256", secret()).update(value).digest("base64url");
-const allowLocalFallback = () => process.env.SIC_ALLOW_LOCAL_AUTH_FALLBACK === "true";
+/** El fallback de usuarios locales queda inhabilitado en producción aunque la bandera esté activa. */
+const allowLocalFallback = () => !esProduccion() && leerVariable("SIC_ALLOW_LOCAL_AUTH_FALLBACK") === "true";
+const atributosCookie = () => `Path=/; HttpOnly; SameSite=Strict${esProduccion() ? "; Secure" : ""}`;
 
 async function usuarioDesdeDbPorUsuario(usuario: string): Promise<UsuarioInterno | null> {
   const db = getDb();
@@ -104,17 +142,19 @@ export async function autenticar(usuario: string, password: string): Promise<Usu
 
 export function crearCookieSesion(user: UsuarioSesion): string {
   const payload = Buffer.from(JSON.stringify({ sub: user.id, exp: Math.floor(Date.now() / 1000) + SESSION_SECONDS })).toString("base64url");
-  return `${COOKIE}=${payload}.${sign(payload)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_SECONDS}`;
+  return `${COOKIE}=${payload}.${sign(payload)}; ${atributosCookie()}; Max-Age=${SESSION_SECONDS}`;
 }
 
-export function eliminarCookieSesion(): string { return `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`; }
+export function eliminarCookieSesion(): string { return `${COOKIE}=; ${atributosCookie()}; Max-Age=0`; }
 
 export async function usuarioDesdeRequest(request: Request): Promise<UsuarioSesion | null> {
   const raw = request.headers.get("cookie")?.split(";").map(item => item.trim()).find(item => item.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
   if (!raw) return null;
   const [payload, signature] = raw.split(".");
   if (!payload || !signature) return null;
-  const valid = Buffer.from(sign(payload)); const supplied = Buffer.from(signature);
+  let firmaEsperada: string;
+  try { firmaEsperada = sign(payload); } catch (error) { console.error("Session verification is disabled by configuration", error); return null; }
+  const valid = Buffer.from(firmaEsperada); const supplied = Buffer.from(signature);
   if (valid.length !== supplied.length || !timingSafeEqual(valid, supplied)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString()) as { sub: string; exp: number };

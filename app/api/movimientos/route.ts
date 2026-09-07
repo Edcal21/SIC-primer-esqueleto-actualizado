@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cuentasBancarias, detallesMovimientos, iglesias, movimientosCuentas } from "../../../db/schema";
+import { cuentasBancarias, detallesMovimientos, iglesias, lineasReporteBancario, movimientosCuentas } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 
@@ -30,11 +30,18 @@ export async function GET(request: Request) {
   const db = getDb();
   const movimientos = await db.select().from(movimientosCuentas).orderBy(desc(movimientosCuentas.creadoEn)).limit(100);
   const ids = movimientos.map(item => item.id);
-  const detalles = ids.length
-    ? await db.select().from(detallesMovimientos).where(inArray(detallesMovimientos.movimientoId, ids)).orderBy(asc(detallesMovimientos.orden))
-    : [];
+  const [detalles, enlazados] = ids.length
+    ? await Promise.all([
+      db.select().from(detallesMovimientos).where(inArray(detallesMovimientos.movimientoId, ids)).orderBy(asc(detallesMovimientos.orden)),
+      db.select({ movimientoId: lineasReporteBancario.movimientoId }).from(lineasReporteBancario).where(inArray(lineasReporteBancario.movimientoId, ids)),
+    ])
+    : [[], []];
 
-  return Response.json({ movimientos, detalles }, { headers: { "Cache-Control": "no-store" } });
+  const conciliados = new Set(enlazados.map(item => item.movimientoId));
+  return Response.json({
+    movimientos: movimientos.map(movimiento => ({ ...movimiento, enlazadoAConciliacion: conciliados.has(movimiento.id) })),
+    detalles,
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {

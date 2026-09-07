@@ -111,6 +111,12 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;back
 .matchCell b{display:block;font-size:12px;color:var(--blue-dark)}
 .matchCell small{display:block;font-size:11px}
 .matchActions{display:flex;gap:14px;align-items:center}
+.passwordCell{display:flex;align-items:center;gap:10px;min-width:220px}
+.passwordCell .inlineInput{min-width:130px}
+.annulPanel{max-width:none;margin-bottom:14px;padding:20px}
+.annulPanel .tableWrap{max-height:none;margin-bottom:14px;border:1px solid var(--line);border-radius:8px}
+.annulPanel .readOnlyBanner{margin-bottom:14px}
+.tablePanel .panelHead .granularity{margin:0}
 .reviewActions{display:grid;gap:8px;min-width:280px}
 .reviewActions label{display:grid;gap:5px;font-size:12px;font-weight:700;color:var(--blue-dark)}
 .reviewActions textarea{border:1px solid var(--line);border-radius:7px;padding:8px;background:#fff;color:var(--ink);font-size:12px;font-family:inherit;resize:vertical}

@@ -22,6 +22,8 @@ type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean}[]; generadoEn:string };
 type CuentaMovimiento = { codigo: string; descripcion: string; naturaleza: "deudora" | "acreedora"; clasificacionFlujo: "operación" | "inversión" | "financiamiento" | "no aplica"; esCuentaMovimiento: boolean; estado: "activa" | "inactiva" };
 type DetalleMinuta = { tipo: "debito" | "credito"; cuentaCodigo: string; monto: string };
+type MovimientoRegistrado = { id: string; fecha: string; iglesiaCodigo: string | null; cuentaBancariaNumero: string | null; referencia: string | null; concepto: string; estado: "registrado" | "anulado"; creadoEn: string; enlazadoAConciliacion?: boolean };
+type DetalleRegistrado = { id: string; movimientoId: string; tipo: "debito" | "credito"; cuentaCodigo: string; cuentaNombre: string; monto: string; orden: number };
 type ResumenSistema = { cuentas: number; cuentasMovimiento: number; iglesiasActivas: number; importaciones: number; movimientos: number; reportesBanco: number; eventosAuditoria: number; ultimaImportacion?: ImportacionBalanza; ultimoMovimiento?: { fecha: string; concepto: string; referencia?: string | null; creadoEn: string }; eventos: { fecha: string; usuario: string; modulo: string; accion: string; resultado: string }[] };
 type ConfiguracionSistema = { institucionNombre: string; sistemaNombre: string; sistemaDescripcion: string; moneda: "NIO"; logoLogin: string };
 type OpcionReporte = { tipo: TipoReporte; titulo: string; descripcion: string; icono: string };
@@ -48,6 +50,7 @@ const menu = [
   { nombre: "Resumen", permiso: "panel:ver" as Permiso, icono: "dashboard" },
   { nombre: "Usuarios", permiso: "usuarios:administrar" as Permiso, icono: "users" },
   { nombre: "Registrar movimiento", permiso: "movimientos:escribir" as Permiso, icono: "entry" },
+  { nombre: "Minutas", permiso: "movimientos:escribir" as Permiso, icono: "reports" },
   { nombre: "Catálogo contable", permiso: "catalogo:administrar" as Permiso, icono: "catalog" },
   { nombre: "Bancos", permiso: "banco:ver" as Permiso, icono: "bank" },
   { nombre: "Conciliación", permiso: "banco:ver" as Permiso, icono: "reconcile" },
@@ -57,7 +60,7 @@ const menu = [
   { nombre: "Configuración", permiso: "configuracion:administrar" as Permiso, icono: "settings" },
 ];
 const menuGroups = [
-  { label: "Operativa", items: ["Resumen", "Registrar movimiento", "Bancos", "Conciliación"] },
+  { label: "Operativa", items: ["Resumen", "Registrar movimiento", "Minutas", "Bancos", "Conciliación"] },
   { label: "Reportes", items: ["Importaciones", "Reportes"] },
   { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Auditoría", "Configuración"] },
 ];
@@ -112,7 +115,7 @@ export default function Home() {
 
   return <main className="shell">
     <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActive} logout={()=>requestConfirmation({ title: "Cerrar sesión segura", message: "Se cerrará la sesión actual y deberá autenticarse nuevamente para continuar.", confirmLabel: "Cerrar sesión", onConfirm: logout })} config={config}/>
-    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Conciliación" ? <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : active === "Configuración" ? <ConfiguracionInstitucional config={config} onSaved={setConfig} notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
+    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Conciliación" ? <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Minutas" ? <Minutas notify={notify}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : active === "Configuración" ? <ConfiguracionInstitucional config={config} onSaved={setConfig} notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
     {notice ? <div className="toast" role="status" aria-live="polite"><span className="toastIcon" aria-hidden="true">✓</span><span>{notice}</span></div> : null}
     {modal ? <ConfirmModal modal={modal} busy={modalBusy} onCancel={()=>{ if (!modalBusy) setModal(null); }} onConfirm={confirmModal}/> : null}
   </main>;
@@ -414,6 +417,7 @@ function CatalogoContable({ notify, requestConfirmation }: { notify: (message: s
 
 function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
+  const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [roles, setRoles] = useState<RolAdmin[]>([]);
   const [permisos, setPermisos] = useState<PermisoAdmin[]>([]);
   const [error, setError] = useState("");
@@ -468,6 +472,21 @@ function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
     notify("Usuario actualizado");
   }
 
+  async function restablecerPassword(item: UsuarioAdmin) {
+    const password = passwords[item.id] ?? "";
+    if (password.length < 12) return setError("La contraseña debe tener al menos 12 caracteres");
+    setError("");
+    const response = await fetch(`/api/admin/usuarios/${item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const result = await response.json();
+    if (!response.ok) return setError(result.error);
+    setPasswords(current => ({ ...current, [item.id]: "" }));
+    notify(`Contraseña restablecida para ${item.usuario}`);
+  }
+
   async function crearRol(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true); setError("");
@@ -505,7 +524,7 @@ function UsuariosAdmin({ notify }: { notify: (message: string) => void }) {
     notify("Permisos actualizados");
   }
 
-  return <><div className="pageHead"><div><span className="eyebrow">ADMINISTRACIÓN</span><h1>Usuarios y roles</h1><p>Gestión inicial de accesos del sistema.</p></div></div><section className="adminLayout"><form className="panel formPanel" onSubmit={crearUsuario}><div className="panelHead compact"><div><h2>Crear usuario</h2><p>El usuario podrá iniciar sesión con el rol asignado.</p></div></div><div className="formGrid"><label>Usuario<input name="usuario" required placeholder="usuario.nuevo"/></label><label>Nombre<input name="nombre" required placeholder="Nombre completo"/></label><label>Rol<select name="rolId" required defaultValue=""><option value="" disabled>Seleccione rol</option>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></label><label>Contraseña inicial<input name="password" type="password" required minLength={8} placeholder="Mínimo 8 caracteres"/></label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear usuario"}</button></div></form><form className="panel formPanel" onSubmit={crearRol}><div className="panelHead compact"><div><h2>Crear rol</h2><p>Defina un perfil reutilizable para usuarios nuevos.</p></div></div><div className="formGrid"><label>Identificador<input name="id" required placeholder="nuevo_rol"/></label><label>Nombre<input name="nombre" required placeholder="Nuevo rol"/></label><label className="wide">Descripción<input name="descripcion" required placeholder="Responsabilidad principal del rol"/></label></div><div className="permissionGrid">{permisos.map(permiso=><label key={permiso.id}><input type="checkbox" name="permisos" value={permiso.id}/><span>{etiquetasPermiso[permiso.id]}</span><small>{permiso.descripcion}</small></label>)}</div><div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear rol"}</button></div></form></section><section className="panel rolesPanel roleMatrix"><div className="panelHead compact"><div><h2>Roles disponibles</h2><p>{roles.length} perfiles configurados</p></div></div>{roles.map(rol=><article key={rol.id} className="roleItem"><b>{rol.nombre}</b><span>{rol.descripcion}</span><div className="permissionGrid compact">{permisos.map(permiso=><label key={`${rol.id}-${permiso.id}`}><input type="checkbox" checked={rol.permisos.includes(permiso.id)} onChange={event=>cambiarPermisoRol(rol,permiso.id,event.target.checked)}/><span>{etiquetasPermiso[permiso.id]}</span></label>)}</div></article>)}</section><section className="panel tablePanel"><div className="panelHead"><div><h2>Usuarios registrados</h2><p>{usuarios.length} cuentas disponibles</p></div></div><div className="tableWrap"><table><thead><tr><th>USUARIO</th><th>NOMBRE</th><th>ROL</th><th>ESTADO</th><th>CREADO</th></tr></thead><tbody>{usuarios.map(item=><tr key={item.id}><td><b>{item.usuario}</b></td><td><input className="inlineInput" value={item.nombre} onChange={event=>setUsuarios(current=>current.map(user=>user.id===item.id?{...user,nombre:event.target.value}:user))} onBlur={event=>actualizarUsuario(item.id,{nombre:event.target.value})}/></td><td><select className="inlineInput" value={item.rolId} onChange={event=>actualizarUsuario(item.id,{rolId:event.target.value})}>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></td><td><button className={item.estado==="activo"?"status done":"status pending"} onClick={()=>actualizarUsuario(item.id,{estado:item.estado==="activo"?"inactivo":"activo"})}>{item.estado}</button></td><td>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</td></tr>)}</tbody></table></div></section></>;
+  return <><div className="pageHead"><div><span className="eyebrow">ADMINISTRACIÓN</span><h1>Usuarios y roles</h1><p>Gestión inicial de accesos del sistema.</p></div></div><section className="adminLayout"><form className="panel formPanel" onSubmit={crearUsuario}><div className="panelHead compact"><div><h2>Crear usuario</h2><p>El usuario podrá iniciar sesión con el rol asignado.</p></div></div><div className="formGrid"><label>Usuario<input name="usuario" required placeholder="usuario.nuevo"/></label><label>Nombre<input name="nombre" required placeholder="Nombre completo"/></label><label>Rol<select name="rolId" required defaultValue=""><option value="" disabled>Seleccione rol</option>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></label><label>Contraseña inicial<input name="password" type="password" required minLength={8} placeholder="Mínimo 8 caracteres"/></label></div>{error?<div className="authError adminError">{error}</div>:null}<div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear usuario"}</button></div></form><form className="panel formPanel" onSubmit={crearRol}><div className="panelHead compact"><div><h2>Crear rol</h2><p>Defina un perfil reutilizable para usuarios nuevos.</p></div></div><div className="formGrid"><label>Identificador<input name="id" required placeholder="nuevo_rol"/></label><label>Nombre<input name="nombre" required placeholder="Nuevo rol"/></label><label className="wide">Descripción<input name="descripcion" required placeholder="Responsabilidad principal del rol"/></label></div><div className="permissionGrid">{permisos.map(permiso=><label key={permiso.id}><input type="checkbox" name="permisos" value={permiso.id}/><span>{etiquetasPermiso[permiso.id]}</span><small>{permiso.descripcion}</small></label>)}</div><div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving?"Creando…":"Crear rol"}</button></div></form></section><section className="panel rolesPanel roleMatrix"><div className="panelHead compact"><div><h2>Roles disponibles</h2><p>{roles.length} perfiles configurados</p></div></div>{roles.map(rol=><article key={rol.id} className="roleItem"><b>{rol.nombre}</b><span>{rol.descripcion}</span><div className="permissionGrid compact">{permisos.map(permiso=><label key={`${rol.id}-${permiso.id}`}><input type="checkbox" checked={rol.permisos.includes(permiso.id)} onChange={event=>cambiarPermisoRol(rol,permiso.id,event.target.checked)}/><span>{etiquetasPermiso[permiso.id]}</span></label>)}</div></article>)}</section><section className="panel tablePanel"><div className="panelHead"><div><h2>Usuarios registrados</h2><p>{usuarios.length} cuentas disponibles</p></div></div><div className="tableWrap"><table><thead><tr><th>USUARIO</th><th>NOMBRE</th><th>ROL</th><th>ESTADO</th><th>CREADO</th><th>CONTRASEÑA</th></tr></thead><tbody>{usuarios.map(item=><tr key={item.id}><td><b>{item.usuario}</b></td><td><input className="inlineInput" value={item.nombre} onChange={event=>setUsuarios(current=>current.map(user=>user.id===item.id?{...user,nombre:event.target.value}:user))} onBlur={event=>actualizarUsuario(item.id,{nombre:event.target.value})}/></td><td><select className="inlineInput" value={item.rolId} onChange={event=>actualizarUsuario(item.id,{rolId:event.target.value})}>{roles.map(rol=><option key={rol.id} value={rol.id}>{rol.nombre}</option>)}</select></td><td><button className={item.estado==="activo"?"status done":"status pending"} onClick={()=>actualizarUsuario(item.id,{estado:item.estado==="activo"?"inactivo":"activo"})}>{item.estado}</button></td><td>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</td><td><div className="passwordCell"><input className="inlineInput" type="password" autoComplete="new-password" placeholder="Nueva contraseña" value={passwords[item.id] ?? ""} onChange={event=>setPasswords(current=>({...current,[item.id]:event.target.value}))}/><button className="linkButton" type="button" onClick={()=>restablecerPassword(item)} disabled={(passwords[item.id]??"").length<12}>Restablecer</button></div></td></tr>)}</tbody></table></div><div className="accountHint">Las contraseñas sembradas por migración son públicas: cámbielas antes de operar en producción. Mínimo 12 caracteres.</div></section></>;
 }
 
 function Bancos({ canUpload, canManageAccounts, notify, requestConfirmation }: { canUpload: boolean; canManageAccounts: boolean; notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
@@ -1017,5 +1036,110 @@ function ConfiguracionInstitucional({ config, onSaved, notify }: { config: Confi
       {error ? <div className="authError adminError">{error}</div> : null}
       <div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving ? "Guardando…" : "Guardar configuración"}</button></div>
     </form>
+  </>;
+}
+
+function Minutas({ notify }: { notify: (message: string) => void }) {
+  const [movimientos, setMovimientos] = useState<MovimientoRegistrado[]>([]);
+  const [detalles, setDetalles] = useState<DetalleRegistrado[]>([]);
+  const [iglesias, setIglesias] = useState<Iglesia[]>([]);
+  const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
+  const [filtro, setFiltro] = useState<"todos" | "registrado" | "anulado">("todos");
+  const [anulando, setAnulando] = useState<MovimientoRegistrado | null>(null);
+  const [motivo, setMotivo] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function cargarMinutas() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/movimientos");
+      const data = await response.json().catch(() => ({})) as { movimientos?: MovimientoRegistrado[]; detalles?: DetalleRegistrado[]; error?: string };
+      if (!response.ok) return setError(data.error ?? `No se pudo cargar el historial de minutas (HTTP ${response.status})`);
+      setMovimientos(data.movimientos ?? []);
+      setDetalles(data.detalles ?? []);
+      setError("");
+    } catch {
+      setError("No se pudo conectar con el servicio de movimientos");
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    void Promise.resolve().then(cargarMinutas);
+    fetch("/api/iglesias").then(async response => { if (response.ok) setIglesias((await response.json()).iglesias ?? []); }).catch(() => undefined);
+    fetch("/api/cuentas-bancarias").then(async response => { if (response.ok) setCuentasBancarias((await response.json()).cuentasBancarias ?? []); }).catch(() => undefined);
+  }, []);
+
+  async function anular() {
+    if (!anulando) return;
+    if (motivo.trim().length < 10) return setError("Indique el motivo de la anulación con al menos 10 caracteres");
+    setSaving(true); setError("");
+    try {
+      const response = await fetch(`/api/movimientos/${anulando.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado: "anulado", motivo: motivo.trim() }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) return setError(result.error ?? "No se pudo anular la minuta");
+      setAnulando(null); setMotivo("");
+      await cargarMinutas();
+      notify("Minuta anulada y registrada en auditoría");
+    } catch {
+      setError("No se pudo conectar con el servicio de movimientos");
+    } finally { setSaving(false); }
+  }
+
+  const nombreIglesia = (codigo: string | null) => iglesias.find(iglesia => iglesia.codigo === codigo)?.nombre ?? codigo ?? "Sin iglesia";
+  const nombreCuenta = (numero: string | null) => cuentasBancarias.find(cuenta => cuenta.numeroCuenta === numero)?.nombre ?? numero ?? "Sin cuenta";
+  const lineasDe = (movimientoId: string) => detalles.filter(detalle => detalle.movimientoId === movimientoId);
+  const totalDe = (movimientoId: string) => lineasDe(movimientoId).filter(detalle => detalle.tipo === "debito").reduce((total, detalle) => total + Number(detalle.monto), 0);
+  const visibles = movimientos.filter(movimiento => filtro === "todos" || movimiento.estado === filtro);
+  const registradas = movimientos.filter(movimiento => movimiento.estado === "registrado");
+
+  return <><div className="pageHead"><div><span className="eyebrow">CONTABILIDAD</span><h1>Minutas registradas</h1><p>Consulte los asientos guardados y anule los que sean incorrectos sin borrar su detalle contable.</p></div></div>
+    <section className="metrics compactMetrics">
+      <article className="metric featured"><p>Minutas consultadas</p><strong>{loading ? "..." : movimientos.length}</strong><small>Últimos 100 asientos registrados</small></article>
+      <article className="metric"><p>Vigentes</p><strong>{loading ? "..." : registradas.length}</strong><small>{movimientos.length - registradas.length} anuladas</small></article>
+      <article className="metric"><p>Monto vigente</p><strong>{dinero.format(registradas.reduce((total, movimiento) => total + totalDe(movimiento.id), 0))}</strong><small>Suma de débitos de minutas vigentes</small></article>
+      <article className="metric"><p>Enlazadas a conciliación</p><strong>{movimientos.filter(movimiento => movimiento.enlazadoAConciliacion).length}</strong><small>No se pueden anular sin deshacer el enlace</small></article>
+    </section>
+    {error ? <div className="authError adminError">{error}</div> : null}
+    {anulando ? <section className="panel formPanel annulPanel">
+      <div className="panelHead compact"><div><h2>Anular minuta del {anulando.fecha}</h2><p>{anulando.concepto} · {dinero.format(totalDe(anulando.id))} · {nombreIglesia(anulando.iglesiaCodigo)}</p></div></div>
+      <div className="tableWrap"><table><thead><tr><th>TIPO</th><th>CUENTA</th><th>MONTO</th></tr></thead><tbody>{lineasDe(anulando.id).map(linea => <tr key={linea.id}>
+        <td>{linea.tipo === "debito" ? "Débito" : "Crédito"}</td>
+        <td><b>{linea.cuentaCodigo}</b> {linea.cuentaNombre}</td>
+        <td className="amount">{dinero.format(Number(linea.monto))}</td>
+      </tr>)}</tbody></table></div>
+      <div className="readOnlyBanner">El asiento y sus líneas se conservan en la base de datos; solo cambia el estado a anulado y queda registrado en auditoría con su motivo.</div>
+      <div className="formGrid"><label className="wide">Motivo de la anulación<textarea value={motivo} onChange={event => setMotivo(event.target.value)} rows={2} required minLength={10}/></label></div>
+      <div className="formActions">
+        <button className="secondary" type="button" onClick={() => { setAnulando(null); setMotivo(""); setError(""); }} disabled={saving}>Cancelar</button>
+        <button className="primary" type="button" onClick={anular} disabled={saving || motivo.trim().length < 10}>{saving ? "Anulando…" : "Confirmar anulación"}</button>
+      </div>
+    </section> : null}
+    <section className="panel tablePanel">
+      <div className="panelHead">
+        <div><h2>Historial de minutas</h2><p>{loading ? "Cargando desde PostgreSQL" : `${visibles.length} de ${movimientos.length} asientos`}</p></div>
+        <div className="granularity" role="group" aria-label="Filtrar por estado">{(["todos", "registrado", "anulado"] as const).map(item => <button key={item} className={filtro === item ? "active" : ""} type="button" onClick={() => setFiltro(item)}>{item === "todos" ? "Todas" : item === "registrado" ? "Vigentes" : "Anuladas"}</button>)}</div>
+      </div>
+      <div className="tableWrap"><table><thead><tr><th>FECHA</th><th>CONCEPTO</th><th>IGLESIA</th><th>CUENTA BANCARIA</th><th>REFERENCIA</th><th>MONTO</th><th>ESTADO</th><th/></tr></thead><tbody>{visibles.map(movimiento => <tr key={movimiento.id}>
+        <td>{movimiento.fecha}</td>
+        <td><b>{movimiento.concepto}</b><small>{lineasDe(movimiento.id).length} líneas contables</small></td>
+        <td>{nombreIglesia(movimiento.iglesiaCodigo)}</td>
+        <td>{nombreCuenta(movimiento.cuentaBancariaNumero)}</td>
+        <td>{movimiento.referencia ?? "Sin referencia"}</td>
+        <td className="amount">{dinero.format(totalDe(movimiento.id))}</td>
+        <td><span className={movimiento.estado === "registrado" ? "status done" : "status danger"}>{movimiento.estado}</span></td>
+        <td>{movimiento.estado === "registrado"
+          ? movimiento.enlazadoAConciliacion
+            ? <small>Enlazada a conciliación</small>
+            : <button className="linkButton" type="button" onClick={() => { setAnulando(movimiento); setMotivo(""); setError(""); }}>Anular</button>
+          : null}</td>
+      </tr>)}</tbody></table></div>
+      {!loading && !visibles.length ? <div className="emptyReport">{movimientos.length ? "Ninguna minuta coincide con el filtro seleccionado." : "Todavía no hay minutas registradas."}</div> : null}
+    </section>
   </>;
 }
