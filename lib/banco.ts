@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import type { getDb } from "../db";
 import { conciliacionesBancarias, cuentasBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../db/schema";
 import { conBloqueoConciliacion } from "./conciliacion-lock";
-import { calcularEquivalenteNio, sumarMontos } from "./moneda";
+import { calcularEquivalenteNio, montosIguales, sumarMontos } from "./moneda";
 import { obtenerTasaVigente } from "./tasas";
 
 type Db = ReturnType<typeof getDb>;
@@ -45,6 +45,10 @@ export type MovimientoConciliable = {
    *  estado de cuenta, nunca la suma de todos los débitos de la minuta. */
   montoOriginal: number;
   moneda: "USD" | "NIO";
+  /** Dirección del efecto sobre la cuenta bancaria: "entrada" cuando la línea marcada es un débito
+   *  a la cuenta de banco (el activo aumenta) y "salida" cuando es un crédito. Es null en las
+   *  minutas históricas sin línea marcada: su dirección nunca se registró y no se infiere. */
+  sentido: "entrada" | "salida" | null;
   /** false = minuta histórica sin ninguna línea marcada como "afecta la cuenta bancaria"; se
    *  conserva el cálculo legado (suma de débitos en NIO) sin inventar una moneda ni una tasa. */
   completo: boolean;
@@ -275,26 +279,54 @@ export async function movimientosConciliables(db: Db, cuentaBancariaNumero: stri
     const lineaId = lineaPorMovimiento.get(movimiento.id) ?? null;
 
     if (marcadas.length) {
+      // Un débito a la cuenta de banco aumenta el activo: entra dinero. Un crédito lo disminuye.
+      // construirDetallesMovimiento garantiza que todas las marcadas van en la misma dirección.
+      const sentido = marcadas[0].tipo === "debito" ? "entrada" as const : "salida" as const;
       return {
         ...movimiento,
         monto: Number(sumarMontos(marcadas.map(fila => fila.monto))),
         montoOriginal: Number(sumarMontos(marcadas.map(fila => fila.montoOriginal))),
         moneda: marcadas[0].moneda,
+        sentido,
         completo: true,
         lineaId,
       };
     }
 
     // Minuta histórica sin línea marcada: se conserva el cálculo legado (suma de débitos en NIO)
-    // sin inventar una moneda ni una tasa para un registro que nunca las capturó.
+    // sin inventar una moneda ni una tasa para un registro que nunca las capturó. Su dirección
+    // tampoco se conoce (sentido null): el emparejamiento la trata como antes, solo por importe.
     const legado = Number(sumarMontos(lineasDetalle.filter(fila => fila.tipo === "debito").map(fila => fila.monto)));
-    return { ...movimiento, monto: legado, montoOriginal: legado, moneda: "NIO" as const, completo: false, lineaId };
+    return { ...movimiento, monto: legado, montoOriginal: legado, moneda: "NIO" as const, sentido: null, completo: false, lineaId };
   });
 }
 
-export const mismoMonto = (linea: { debito: string; credito: string; moneda: string }, movimiento: MovimientoConciliable) =>
-  linea.moneda === movimiento.moneda && (linea.moneda === "NIO" || movimiento.completo) &&
-  Math.abs(Math.abs(Number(linea.credito) - Number(linea.debito)) - movimiento.montoOriginal) < 0.01;
+/**
+ * Decide si una línea del estado de cuenta y una minuta representan el mismo hecho bancario.
+ * Compara tres cosas, y las tres tienen que coincidir:
+ *
+ * 1. **Moneda**: nunca se cruzan USD con NIO, y una línea USD solo empareja con minutas completas
+ *    (las históricas no capturaron su importe en dólares y no se adivina).
+ * 2. **Dirección**: un crédito del banco es dinero que entra y solo empareja con una minuta de
+ *    entrada; un débito es dinero que sale. Sin esta comprobación un retiro y un depósito del mismo
+ *    importe son indistinguibles y el enlace automático puede cruzarlos.
+ * 3. **Importe**: en la moneda original y con aritmética decimal exacta, no con tolerancia de punto
+ *    flotante (0.03 - 0.02 da 0.00999… en IEEE-754 y colaba importes distintos como iguales).
+ *
+ * Las minutas históricas sin dirección registrada (`sentido` null) conservan la comparación previa
+ * por importe: no se les inventa un sentido para poder ser más estrictos con ellas.
+ */
+export const mismoMonto = (linea: { debito: string; credito: string; moneda: string }, movimiento: MovimientoConciliable) => {
+  if (linea.moneda !== movimiento.moneda) return false;
+  if (linea.moneda !== "NIO" && !movimiento.completo) return false;
+
+  const entra = Number(linea.credito) > 0;
+  const sale = Number(linea.debito) > 0;
+  if (movimiento.sentido && ((movimiento.sentido === "entrada" && !entra) || (movimiento.sentido === "salida" && !sale))) return false;
+
+  const importeLinea = entra ? linea.credito : linea.debito;
+  return montosIguales(importeLinea, movimiento.montoOriginal);
+};
 
 /** Una línea USD sin tasa registrada para su fecha está pendiente de completar: no se infiere el
  *  valor y se bloquea su enlace (automático o manual) hasta que se complete. */

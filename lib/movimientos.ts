@@ -60,6 +60,17 @@ export function construirDetallesMovimiento(detalles: DetalleEntrada[], contexto
     return { ok: false, error: "Marque al menos una línea como la que afecta la cuenta bancaria de la minuta" };
   }
 
+  // Una minuta afecta la cuenta bancaria en una sola dirección: o entra dinero (débito a la cuenta
+  // de banco) o sale (crédito). Admitir ambas a la vez produciría un importe bancario sin sentido
+  // (la suma de las marcadas dejaría de representar el efecto neto sobre el banco) y además sería
+  // inconciliable: una minuta solo puede enlazarse con una línea del estado de cuenta.
+  if (marcadas.some(detalle => detalle.tipo !== marcadas[0].tipo)) {
+    return {
+      ok: false,
+      error: "Las líneas que afectan la cuenta bancaria deben ir todas en la misma dirección (todas débito o todas crédito). Si la minuta representa una entrada y una salida, regístrelas por separado.",
+    };
+  }
+
   if (contexto.cuentaBancariaMoneda === "USD" && !contexto.tasaUsd) {
     return {
       ok: false,

@@ -96,3 +96,35 @@ test("minuta con más de dos líneas: solo la línea marcada lleva el importe ba
   assert.equal(banco.montoOriginal, "150.00");
   assert.notEqual(banco.montoOriginal, "300.00"); // nunca la suma total de los débitos (100+50+150)
 });
+
+// --- Regresión H4: las líneas bancarias de una minuta van en una sola dirección ---
+
+test("rechaza una minuta con líneas bancarias en direcciones opuestas", () => {
+  // Antes se aceptaba y reportaba un importe bancario de 200 cuando el efecto neto es 0.
+  const resultado = construirDetallesMovimiento(
+    [
+      { tipo: "debito", cuentaCodigo: "10100001", cuentaNombre: "Banco", montoOriginal: "100.00", afectaCuentaBancaria: true },
+      { tipo: "credito", cuentaCodigo: "10100001", cuentaNombre: "Banco", montoOriginal: "100.00", afectaCuentaBancaria: true },
+    ],
+    cuentaUsdConTasa,
+  );
+  assert.equal(resultado.ok, false);
+  if (resultado.ok) return;
+  assert.match(resultado.error, /misma dirección/);
+});
+
+test("acepta varias líneas bancarias si todas van en la misma dirección", () => {
+  const resultado = construirDetallesMovimiento(
+    [
+      { tipo: "debito", cuentaCodigo: "10100001", cuentaNombre: "Banco", montoOriginal: "60.00", afectaCuentaBancaria: true },
+      { tipo: "debito", cuentaCodigo: "10100001", cuentaNombre: "Banco", montoOriginal: "40.00", afectaCuentaBancaria: true },
+      { tipo: "credito", cuentaCodigo: "40100001", cuentaNombre: "Ingresos", monto: "3650.00" },
+    ],
+    cuentaUsdConTasa,
+  );
+  assert.equal(resultado.ok, true, resultado.ok ? "" : resultado.error);
+  if (!resultado.ok) return;
+  const marcadas = resultado.detalles.filter(detalle => detalle.afectaCuentaBancaria);
+  assert.equal(marcadas.length, 2);
+  assert.equal(marcadas.reduce((total, d) => total + Number(d.montoOriginal), 0), 100);
+});
