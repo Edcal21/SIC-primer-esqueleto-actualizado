@@ -6,13 +6,13 @@ import { rolesPermisos, usuarios as usuariosTable } from "../db/schema";
 import { jsonSeguro } from "./security";
 
 export type RolId = "administrador" | "contador_general" | "operador_bancario" | "auditor_general";
-export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
+export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
 
 export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[] };
 type UsuarioInterno = UsuarioSesion & { salt: string; passwordHash: string };
 
 const permisosPorRol: Record<RolId, Permiso[]> = {
-  administrador: ["panel:ver", "usuarios:administrar", "roles:administrar", "catalogo:administrar", "auditoria:ver", "configuracion:administrar", "banco:ver", "conciliacion:aprobar"],
+  administrador: ["panel:ver", "usuarios:administrar", "roles:administrar", "catalogo:administrar", "iglesias:administrar", "auditoria:ver", "configuracion:administrar", "banco:ver", "conciliacion:aprobar"],
   contador_general: ["panel:ver", "importaciones:administrar", "reportes:ver", "reportes:descargar"],
   operador_bancario: ["panel:ver", "movimientos:escribir", "banco:ver", "banco:cargar", "reportes:ver"],
   auditor_general: ["panel:ver", "banco:ver", "reportes:ver", "reportes:descargar", "auditoria:ver"],

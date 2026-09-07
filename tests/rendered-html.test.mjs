@@ -109,6 +109,23 @@ test("sensitive uploads are rate limited", async () => {
   assert.match(balanceUpload, /verificarRateLimit/, "la importación de balanza debe limitar intentos por IP");
 });
 
+test("church catalog is administrable from API and UI", async () => {
+  const [page, auth, iglesias, iglesiaPatch, migration] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/iglesias/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/iglesias/[codigo]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0019_iglesias_administrables.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(auth, /iglesias:administrar/, "debe existir un permiso explícito para administrar iglesias");
+  assert.match(migration, /iglesias:administrar/, "la migración debe sembrar el permiso de iglesias");
+  assert.match(page, /IglesiasAdmin/, "la UI debe exponer una pantalla de administración de iglesias");
+  assert.match(page, /active === "Iglesias"/, "el módulo Iglesias debe estar conectado al switch principal");
+  assert.match(iglesias, /export async function POST/, "la API debe permitir crear iglesias");
+  assert.match(iglesiaPatch, /export async function PATCH/, "la API debe permitir actualizar iglesias");
+});
+
 test("movement annulment preserves accounting detail", async () => {
   const anular = await readFile(new URL("../app/api/movimientos/[id]/route.ts", import.meta.url), "utf8");
 

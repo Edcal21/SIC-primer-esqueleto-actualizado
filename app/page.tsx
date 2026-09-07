@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
+type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
 type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
 type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string; cuentaBancariaNumero?: string | null; periodoInicio?: string | null; periodoFin?: string | null; totalLineas?: number; totalDebitos?: string; totalCreditos?: string; mensajeError?: string | null; conciliacionId?: string | null; conciliacionEstado?: string | null };
 type LineaBanco = { id: string; numeroLinea: number; fecha: string | null; referencia: string | null; descripcion: string; debito: string; credito: string; saldo: string | null; estadoConciliacion: "pendiente" | "conciliada" | "descartada"; movimientoId: string | null };
@@ -15,7 +15,7 @@ type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: nu
 type PermisoAdmin = { id: Permiso; descripcion: string };
 type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
-type Iglesia = { codigo: string; nombre: string };
+type Iglesia = { codigo: string; nombre: string; estado?: "activa" | "inactiva" };
 type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO"; estado?: "activa" | "inactiva" };
 type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 type Granularidad = "dia" | "mes" | "trimestre" | "anio";
@@ -37,6 +37,7 @@ const etiquetasPermiso: Record<Permiso, string> = {
   "roles:administrar": "Administrar roles",
   "movimientos:escribir": "Registrar minutas",
   "catalogo:administrar": "Administrar catálogo",
+  "iglesias:administrar": "Administrar iglesias",
   "banco:ver": "Ver bancos",
   "banco:cargar": "Cargar reportes bancarios",
   "conciliacion:aprobar": "Aprobar conciliación",
@@ -52,6 +53,7 @@ const menu = [
   { nombre: "Registrar movimiento", permiso: "movimientos:escribir" as Permiso, icono: "entry" },
   { nombre: "Minutas", permiso: "movimientos:escribir" as Permiso, icono: "reports" },
   { nombre: "Catálogo contable", permiso: "catalogo:administrar" as Permiso, icono: "catalog" },
+  { nombre: "Iglesias", permiso: "iglesias:administrar" as Permiso, icono: "church" },
   { nombre: "Bancos", permiso: "banco:ver" as Permiso, icono: "bank" },
   { nombre: "Conciliación", permiso: "banco:ver" as Permiso, icono: "reconcile" },
   { nombre: "Importaciones", permiso: "importaciones:administrar" as Permiso, icono: "upload" },
@@ -62,7 +64,7 @@ const menu = [
 const menuGroups = [
   { label: "Operativa", items: ["Resumen", "Registrar movimiento", "Minutas", "Bancos", "Conciliación"] },
   { label: "Reportes", items: ["Importaciones", "Reportes"] },
-  { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Auditoría", "Configuración"] },
+  { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Iglesias", "Auditoría", "Configuración"] },
 ];
 const defaultConfig: ConfiguracionSistema = { institucionNombre: "Universal Nicaragua", sistemaNombre: "SIC", sistemaDescripcion: "Sistema de Información Contable", moneda: "NIO", logoLogin: "/universal-nicaragua-login.png" };
 
@@ -115,7 +117,7 @@ export default function Home() {
 
   return <main className="shell">
     <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActive} logout={()=>requestConfirmation({ title: "Cerrar sesión segura", message: "Se cerrará la sesión actual y deberá autenticarse nuevamente para continuar.", confirmLabel: "Cerrar sesión", onConfirm: logout })} config={config}/>
-    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Conciliación" ? <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Minutas" ? <Minutas notify={notify}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : active === "Configuración" ? <ConfiguracionInstitucional config={config} onSaved={setConfig} notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
+    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={()=>setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content">{active === "Resumen" ? <Resumen user={user} setActive={setActive}/> : active === "Usuarios" ? <UsuariosAdmin notify={notify}/> : active === "Bancos" ? <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Conciliación" ? <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/> : active === "Importaciones" ? <Importaciones notify={notify}/> : active === "Auditoría" ? <Auditoria/> : active === "Reportes" ? <Reportes canDownload={can("reportes:descargar")}/> : active === "Registrar movimiento" ? <Movimiento notify={notify} requestConfirmation={requestConfirmation}/> : active === "Minutas" ? <Minutas notify={notify}/> : active === "Catálogo contable" ? <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/> : active === "Iglesias" ? <IglesiasAdmin notify={notify} requestConfirmation={requestConfirmation}/> : active === "Configuración" ? <ConfiguracionInstitucional config={config} onSaved={setConfig} notify={notify}/> : <Modulo nombre={active} user={user}/>}</div></section>
     {notice ? <div className="toast" role="status" aria-live="polite"><span className="toastIcon" aria-hidden="true">✓</span><span>{notice}</span></div> : null}
     {modal ? <ConfirmModal modal={modal} busy={modalBusy} onCancel={()=>{ if (!modalBusy) setModal(null); }} onConfirm={confirmModal}/> : null}
   </main>;
@@ -141,6 +143,7 @@ function MenuIcon({ name, className = "navIcon" }: { name: string; className?: s
     users: "M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3ZM8 11c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13Zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5C23 14.17 18.33 13 16 13Z",
     entry: "M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7V4Z",
     catalog: "M5 4h14v3H5V4Zm0 6h14v3H5v-3Zm0 6h14v3H5v-3Z",
+    church: "M12 2v4h3v2h-3v3l6 4v7h-5v-4h-2v4H6v-7l6-4V8H9V6h3V2Zm-4 14v4h2v-4H8Zm6 0v4h2v-4h-2Z",
     bank: "M12 3 3 8v2h18V8l-9-5ZM5 12v7H3v2h18v-2h-2v-7h-2v7h-3v-7h-2v7H9v-7H7v7H5v-7Z",
     upload: "M11 16h2V8l3.5 3.5 1.42-1.42L12 4.16 6.08 10.08 7.5 11.5 11 8v8Zm-5 2h12v2H6v-2Z",
     reports: "M5 3h14v18H5V3Zm3 4v2h8V7H8Zm0 4v2h8v-2H8Zm0 4v2h5v-2H8Z",
@@ -991,6 +994,89 @@ function ConciliacionBancaria({ canReconcile, canApprove, notify, requestConfirm
         </tr>)}</tbody></table></div>
       </section> : null}
     </> : null}
+  </>;
+}
+
+function IglesiasAdmin({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
+  const [iglesias, setIglesias] = useState<Iglesia[]>([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function cargarIglesias() {
+    const response = await fetch("/api/iglesias?estado=todas");
+    const data = await response.json().catch(() => ({})) as { iglesias?: Iglesia[]; error?: string };
+    if (response.ok) setIglesias(data.iglesias ?? []);
+    else setError(data.error ?? "No se pudo cargar el catálogo de iglesias");
+  }
+
+  useEffect(() => { void Promise.resolve().then(cargarIglesias); }, []);
+
+  async function crearIglesia(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try {
+      const response = await fetch("/api/iglesias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codigo: form.get("codigo"), nombre: form.get("nombre") }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) return setError(result.error ?? "No se pudo crear la iglesia");
+      formElement.reset();
+      await cargarIglesias();
+      notify("Iglesia creada");
+    } finally { setSaving(false); }
+  }
+
+  async function actualizarIglesia(codigo: string, changes: Partial<Iglesia>) {
+    setError("");
+    const response = await fetch(`/api/iglesias/${encodeURIComponent(codigo)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    const result = await response.json().catch(() => ({})) as { iglesia?: Iglesia; error?: string };
+    if (!response.ok || !result.iglesia) return setError(result.error ?? "No se pudo actualizar la iglesia");
+    setIglesias(current => current.map(iglesia => iglesia.codigo === codigo ? result.iglesia as Iglesia : iglesia));
+    notify("Iglesia actualizada");
+  }
+
+  const activas = iglesias.filter(iglesia => (iglesia.estado ?? "activa") === "activa");
+
+  return <><div className="pageHead"><div><span className="eyebrow">INSTITUCIÓN</span><h1>Iglesias</h1><p>Administre el catálogo institucional que se usa al registrar minutas contables.</p></div></div>
+    <section className="adminLayout">
+      <form className="panel formPanel" onSubmit={crearIglesia}>
+        <div className="panelHead compact"><div><h2>Nueva iglesia</h2><p>El código debe coincidir con la codificación institucional de 8 dígitos.</p></div></div>
+        <div className="formGrid">
+          <label>Código<input name="codigo" required minLength={8} maxLength={8} inputMode="numeric" placeholder="00000001"/></label>
+          <label className="wide">Nombre<input name="nombre" required placeholder="Nombre oficial de la iglesia"/></label>
+        </div>
+        {error ? <div className="authError adminError">{error}</div> : null}
+        <div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving ? "Creando..." : "Crear iglesia"}</button></div>
+      </form>
+      <section className="panel rolesPanel">
+        <div className="panelHead compact"><div><h2>Resumen</h2><p>{iglesias.length} iglesias registradas</p></div></div>
+        <article className="metric inlineMetric"><p>Activas</p><strong>{activas.length}</strong></article>
+        <article className="metric inlineMetric"><p>Inactivas</p><strong>{iglesias.length - activas.length}</strong></article>
+      </section>
+    </section>
+    <section className="panel tablePanel">
+      <div className="panelHead"><div><h2>Iglesias registradas</h2><p>Fuente: PostgreSQL</p></div></div>
+      <div className="tableWrap"><table><thead><tr><th>CÓDIGO</th><th>NOMBRE</th><th>ESTADO</th></tr></thead><tbody>{iglesias.map(iglesia => <tr key={iglesia.codigo}>
+        <td><b>{iglesia.codigo}</b></td>
+        <td><input className="inlineInput" defaultValue={iglesia.nombre} onBlur={event => { const nombre = event.target.value.trim(); if (nombre && nombre !== iglesia.nombre) void actualizarIglesia(iglesia.codigo, { nombre }); }}/></td>
+        <td><button type="button" className={(iglesia.estado ?? "activa") === "activa" ? "status done" : "status pending"} onClick={() => requestConfirmation({
+          title: "Confirmar cambio de iglesia",
+          message: `${(iglesia.estado ?? "activa") === "activa" ? "Se desactivará" : "Se activará"} ${iglesia.codigo} · ${iglesia.nombre}. Las iglesias inactivas no quedan disponibles para nuevas minutas.`,
+          confirmLabel: "Aplicar cambio",
+          isDanger: (iglesia.estado ?? "activa") === "activa",
+          onConfirm: () => actualizarIglesia(iglesia.codigo, { estado: (iglesia.estado ?? "activa") === "activa" ? "inactiva" : "activa" }),
+        })}>{iglesia.estado ?? "activa"}</button></td>
+      </tr>)}</tbody></table></div>
+      {!iglesias.length ? <div className="emptyReport">Todavía no hay iglesias registradas.</div> : null}
+    </section>
   </>;
 }
 

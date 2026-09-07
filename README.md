@@ -209,7 +209,8 @@ tests/               Pruebas automatizadas
 | `/api/auth/logout` | `POST` | Elimina la sesión. |
 | `/api/movimientos` | `GET`, `POST` | Consulta o registra encabezados y detalles de movimientos. |
 | `/api/movimientos/:id` | `PATCH` | Anula una minuta registrada conservando su detalle contable. |
-| `/api/iglesias` | `GET` | Lista las iglesias activas y sus códigos. |
+| `/api/iglesias` | `GET`, `POST` | Lista o crea iglesias institucionales. |
+| `/api/iglesias/:codigo` | `PATCH` | Actualiza nombre o estado de una iglesia. |
 | `/api/banco/reportes` | `GET`, `POST` | Consulta el historial y procesa estados de cuenta guardando cada movimiento. |
 | `/api/banco/reportes/:id` | `GET` | Devuelve el estado de cuenta con sus líneas persistidas. |
 | `/api/conciliaciones` | `GET`, `POST` | Consulta conciliaciones y genera una nueva desde un estado de cuenta procesado. |
@@ -246,12 +247,10 @@ Pendiente para producción, en orden de prioridad:
 
 1. **Pruebas del intérprete bancario con archivos reales de cada banco.** `lib/banco.ts` cubre los encabezados
    más comunes, pero cada banco publica su propio formato; valide un archivo real por banco antes de operar.
-2. **CRUD de iglesias desde administración.** Hoy el catálogo de iglesias se mantiene por migración.
-3. **Conversión de moneda para cuentas en USD.** El sistema opera en córdobas; una cuenta bancaria en USD se
+2. **Conversión de moneda para cuentas en USD.** El sistema opera en córdobas; una cuenta bancaria en USD se
    concilia contra minutas registradas en córdobas sin aplicar tipo de cambio.
-4. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
-5. **Límite de intentos de acceso y encabezados de seguridad** (CSP, X-Frame-Options, Referrer-Policy).
-6. **Restricción de partida doble en base de datos.** Hoy el cuadre se valida en la interfaz y en la API, no
+3. **Retención del archivo bancario original.** Se guardan los movimientos interpretados, no el archivo fuente.
+4. **Restricción de partida doble en base de datos.** Hoy el cuadre se valida en la interfaz y en la API, no
    como restricción de PostgreSQL.
 7. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
 

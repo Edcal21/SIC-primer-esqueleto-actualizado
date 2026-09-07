@@ -6,7 +6,7 @@ Estado revisado: 2026-09-07.
 
 - Autenticacion, sesion, usuarios, roles y permisos.
 - Catalogo contable y actualizacion de cuentas.
-- Iglesias activas usadas en registro de movimientos.
+- Iglesias activas usadas en registro de movimientos y CRUD administrativo de iglesias.
 - Movimientos contables y detalle debito/credito, con consulta y anulacion desde la pantalla Minutas.
 - Restablecimiento de contrasenas de usuarios desde la pantalla de administracion.
 - Importaciones de balanza de comprobacion.
@@ -17,7 +17,7 @@ Estado revisado: 2026-09-07.
   `conciliaciones_bancarias`.
 - CRUD de cuentas bancarias.
 - Configuracion institucional editable desde la pantalla de administracion.
-- Auditoria de acciones relevantes, incluidas las de conciliacion y configuracion.
+- Auditoria de acciones relevantes, incluidas las de conciliacion, iglesias y configuracion.
 - Resumen operativo del dashboard.
 - Catalogo visible de reportes.
 
@@ -40,6 +40,7 @@ podria romper reglas contables si no se hace con una capa adicional de administr
 | `banco:cargar` | Operador bancario | Procesar estados de cuenta, generar conciliaciones y enlazar o descartar lineas. |
 | `conciliacion:aprobar` | Administrador | Aprobar o rechazar una conciliacion en borrador. |
 | `catalogo:administrar` | Contador y administrador segun asignacion | CRUD de cuentas contables y de cuentas bancarias. |
+| `iglesias:administrar` | Administrador | CRUD del catalogo institucional de iglesias. |
 | `configuracion:administrar` | Administrador | Editar la identidad institucional del sistema. |
 
 Quien carga y enlaza no aprueba: `banco:cargar` y `conciliacion:aprobar` se otorgan a roles distintos.
@@ -54,14 +55,13 @@ desde la pantalla de usuarios.
   de sesion con atributo `Secure`.
 - El sistema falla cerrado: si el secreto no sirve, el login responde 503 y ninguna sesion se valida.
 - Las contrasenas sembradas por migracion son publicas y ya pueden rotarse desde la interfaz.
+- Las respuestas protegidas incluyen encabezados de seguridad y las rutas sensibles aplican limite de intentos.
 
 ## Pendiente de conversion
 
-- CRUD completo de iglesias para administradores; hoy se mantienen por migracion.
 - Activar o desactivar reportes desde administracion.
 - Historial de cambios sobre configuracion institucional; hoy solo queda la traza en auditoria.
 - Conversion de moneda para cuentas bancarias en dolares.
 - Retencion del archivo bancario original ademas de sus lineas interpretadas.
 - Parametros contables por periodo, como cierre mensual.
-- Limite de intentos de acceso y encabezados de seguridad (CSP, X-Frame-Options, Referrer-Policy).
 - Restriccion de partida doble como constraint de PostgreSQL, hoy validada en interfaz y API.
