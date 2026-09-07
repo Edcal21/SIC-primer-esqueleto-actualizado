@@ -298,8 +298,8 @@ comprobación de que la carga bancaria persiste líneas y de que conciliación y
 y las pruebas de comportamiento de `lib/moneda.ts` y `lib/movimientos.ts` (aritmética decimal exacta,
 identificación del importe que afecta al banco, bloqueo por tasa faltante).
 
-`pnpm test:db` ejecuta además `tests/banco-moneda.test.mjs` contra una base PostgreSQL real (usa
-`DATABASE_URL` de `.dev.vars`; requiere haber aplicado las migraciones con `pnpm db:migrate`). No corre
+`SIC_TEST_DATABASE_URL=postgres://... pnpm test:db` ejecuta además `tests/banco-moneda.test.mjs` contra una base PostgreSQL real (usa
+`SIC_TEST_DATABASE_URL`; requiere haber aplicado las migraciones en esa base desechable). No corre
 dentro de `pnpm test` porque, a diferencia del resto de la suite, necesita una base de datos disponible.
 Cubre con datos reales: USD 100 × tasa 36.50 = NIO 3650.00; dos minutas de USD 100 con tasas distintas
 conciliando cada una por USD 100 exactos (no por su distinto equivalente en NIO); rechazo de tasas
@@ -323,13 +323,26 @@ Pendiente para producción, en orden de prioridad:
 4. **Valoración cambiaria de cierre.** Ver "Cuentas bancarias en USD" arriba: la política contable para
    reconocer la diferencia cambiaria al cierre queda pendiente de definir; el sistema no genera asientos
    automáticos.
-5. **Interpretación de fechas en la carga de estados de cuenta.** Se detectó, fuera del alcance de este
-   cambio, que `lib/banco.ts` puede interpretar mal una fecha en formato `AAAA-MM-DD` dentro de un CSV
-   (el analizador de hojas de cálculo la reordena antes de llegar al parser propio de fechas); el formato
-   `DD/MM/AAAA` documentado arriba no presenta el problema. Revisar antes de depender de fechas ISO en
-   estados de cuenta.
-6. PostgreSQL administrado, secretos, HTTPS forzado, monitoreo y respaldos del entorno.
+
 
 ## Soporte
 
 Al informar un incidente, incluya comando ejecutado, versiones de Node y pnpm, navegador, error completo y pasos para reproducirlo. Nunca comparta contraseñas, cookies, secretos ni datos financieros reales.
+
+### Correcciones de conciliación y fechas
+
+El emparejamiento automático y manual exige moneda e importe compatibles. Las minutas USD
+históricas sin línea bancaria identificada no se enlazan; se conserva el tratamiento legado NIO.
+La aprobación revalida enlaces y tasas, incluidos enlaces inválidos anteriores a esta corrección.
+
+Anular, generar, auto-enlazar, modificar líneas y aprobar se ejecutan bajo transacción y un
+bloqueo advisory PostgreSQL compartido, adquirido antes de leer estados. Esta estrategia
+serializa estas escrituras entre instancias; puede limitar rendimiento con alto volumen.
+No sustituye las restricciones de BD frente a escrituras SQL externas.
+
+CSV conserva las fechas sin reinterpretación de SheetJS: ISO AAAA-MM-DD o formato local
+DD/MM/AAAA (día primero). Se rechazan fechas imposibles y años de dos dígitos; Excel mantiene
+sus celdas de fecha. Archivos ya importados incorrectamente requieren revisión y recarga.
+
+Las pruebas de BD requieren una base desechable migrada y `SIC_TEST_DATABASE_URL` explícita.
+La suite crea y elimina datos con prefijo TST-USD; no debe apuntar a una base operativa.

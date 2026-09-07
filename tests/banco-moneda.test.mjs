@@ -2,7 +2,6 @@
 // DATABASE_URL configurado (ver .dev.vars); se documentan como suite separada (`pnpm test:db`)
 // porque, a diferencia del resto de `pnpm test`, necesitan una base de datos disponible.
 import assert from "node:assert/strict";
-import { config } from "dotenv";
 import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -20,7 +19,9 @@ import { construirDetallesMovimiento } from "../lib/movimientos.ts";
 import { actualizarTasa, crearTasa, obtenerTasaVigente } from "../lib/tasas.ts";
 import { tieneMovimientosIncompatibles } from "../lib/cuentasBancarias.ts";
 
-config({ path: ".dev.vars" });
+// Nunca tomar la base operativa de .dev.vars para una suite que inserta y borra.
+if (!process.env.SIC_TEST_DATABASE_URL) throw new Error("Configure SIC_TEST_DATABASE_URL con una BD desechable migrada");
+process.env.DATABASE_URL = process.env.SIC_TEST_DATABASE_URL;
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL no está configurado; estas pruebas requieren una base PostgreSQL de pruebas (ver .dev.vars.example).");
@@ -280,4 +281,102 @@ test("regresión NIO: una minuta histórica sin línea marcada conserva el cálc
   const [conciliable] = await movimientosConciliables(db, CUENTA_NIO, "2026-01-20", "2026-01-20");
   assert.equal(conciliable.completo, false, "sin línea marcada, la minuta se trata como histórica/legada");
   assert.equal(conciliable.monto, 300);
+});
+
+// Rutas reales, sesión firmada y conexiones independientes contra BD de pruebas.
+// Ejecutar con SIC_TEST_WORKER_ENV=true para resolver el binding de Cloudflare.
+async function rutas() {
+  const [{ PATCH: conciliar }, { PATCH: anular }, { crearCookieSesion }] = await Promise.all([
+    import('../app/api/conciliaciones/[id]/route.ts'),
+    import('../app/api/movimientos/[id]/route.ts'),
+    import('../lib/auth.ts'),
+  ]);
+  const enviar = (fn, id, body, usuario = 'usr-banco') => fn(new Request('http://localhost/api/test', {
+    method:'PATCH', headers:{'Content-Type':'application/json', cookie:crearCookieSesion({id:usuario}).split(';')[0]}, body:JSON.stringify(body),
+  }), {params:Promise.resolve({id})});
+  return {conciliar,anular,enviar};
+}
+async function escenario(nombre, legado = false) {
+  const movimiento = legado ? await db.transaction(async tx => {
+    const [m] = await tx.insert(schema.movimientosCuentas).values({fecha:'2026-03-10',iglesiaCodigo:IGLESIA,cuentaBancariaNumero:CUENTA_USD,referencia:nombre,concepto:nombre,creadoPor:USUARIO_ADMIN}).returning();
+    await tx.insert(schema.detallesMovimientos).values(['debito','credito'].map((tipo,i)=>({movimientoId:m.id,tipo,cuentaCodigo:'10100001',cuentaNombre:'Legado',monto:'100',montoOriginal:'100',moneda:'NIO',tasaCambio:'1',orden:i+1})));
+    return m;
+  }) : await crearMovimientoUsd('2026-03-10','100.00','36.5',nombre);
+  const [reporte] = await db.insert(schema.reportesBancarios).values({nombre,fecha:'2026-03-10',estado:'procesado',archivoTamano:1,cargadoPor:USUARIO_ADMIN,cargadoPorNombre:'Test',cuentaBancariaNumero:CUENTA_USD,periodoInicio:'2026-03-10',periodoFin:'2026-03-10'}).returning();
+  const [linea] = await db.insert(schema.lineasReporteBancario).values({reporteId:reporte.id,numeroLinea:1,fecha:'2026-03-10',descripcion:nombre,credito:'100',debito:'0',moneda:'USD',tasaCambio:'36.5',creditoNio:'3650',debitoNio:'0'}).returning();
+  const [conciliacion] = await db.insert(schema.conciliacionesBancarias).values({reporteId:reporte.id,cuentaBancariaNumero:CUENTA_USD,periodo:'2026-03',creadoPor:'usr-banco'}).returning();
+  return {movimiento,reporte,linea,conciliacion};
+}
+
+test('USD histórico no enlaza manualmente ni permite aprobar un enlace inválido', async () => {
+  const e = await escenario('LEGADO-INVALIDO',true);
+  assert.equal(await autoConciliar(db,e.reporte.id,CUENTA_USD,'usr-banco'),0);
+  const {conciliar,enviar} = await rutas();
+  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar' ,lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,409);
+  // Simular un enlace incorrecto previo a la corrección.
+  await db.update(schema.lineasReporteBancario).set({estadoConciliacion:'conciliada',movimientoId:e.movimiento.id}).where(eq(schema.lineasReporteBancario.id,e.linea.id));
+  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin')).status,409);
+});
+
+test('anular y conciliar concurrentemente no deja una minuta anulada enlazada', async () => {
+  const e = await escenario('CARRERA-ANULAR');
+  const {conciliar,anular,enviar} = await rutas();
+  const resultados = await Promise.all([
+    enviar(anular,e.movimiento.id,{estado:'anulado',motivo:'Prueba concurrente de anulación'}),
+    enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id}),
+  ]);
+  assert.equal(resultados.filter(r=>r.status===200).length,1);
+  const [m] = await db.select().from(schema.movimientosCuentas).where(eq(schema.movimientosCuentas.id,e.movimiento.id));
+  const [l] = await db.select().from(schema.lineasReporteBancario).where(eq(schema.lineasReporteBancario.id,e.linea.id));
+  assert.ok(m.estado!=='anulado' || l.movimientoId===null);
+});
+
+test('reabrir y aprobar simultáneamente mantienen estado coherente', async () => {
+  const e = await escenario('CARRERA-REABRIR');
+  const {conciliar,enviar} = await rutas();
+  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,200);
+  const resultados = await Promise.all([
+    enviar(conciliar,e.conciliacion.id,{accion:'reabrir',lineaId:e.linea.id}),
+    enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin'),
+  ]);
+  assert.equal(resultados.filter(r=>r.status===200).length,1);
+  const [c] = await db.select().from(schema.conciliacionesBancarias).where(eq(schema.conciliacionesBancarias.id,e.conciliacion.id));
+  const [l] = await db.select().from(schema.lineasReporteBancario).where(eq(schema.lineasReporteBancario.id,e.linea.id));
+  assert.ok(c.estado!=='aprobada' || l.estadoConciliacion==='conciliada');
+});
+
+test('dos aprobaciones simultáneas producen una transición y un evento', async () => {
+  const e = await escenario('CARRERA-APROBAR');
+  const {conciliar,enviar} = await rutas();
+  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,200);
+  const resultados = await Promise.all([1,2].map(()=>enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin')));
+  assert.deepEqual(resultados.map(r=>r.status).sort(),[200,409]);
+  const eventos = await db.select().from(schema.auditoriaEventos).where(and(eq(schema.auditoriaEventos.entidadId,e.conciliacion.id),eq(schema.auditoriaEventos.accion,'Aprobó conciliación bancaria')));
+  assert.equal(eventos.length,1);
+});
+
+test('CSV ISO selecciona tasa del día correcto y conserva período', async () => {
+  const { leerEstadoBancario, resumenEstadoBancario, periodoDesdeFecha } = await import('../lib/banco.ts');
+  await crearTasa(db,{fecha:'2026-09-07',tasa:'36.5',fuente:'prueba-automatizada',usuarioId:USUARIO_ADMIN});
+  await crearTasa(db,{fecha:'2026-07-09',tasa:'40',fuente:'prueba-automatizada',usuarioId:USUARIO_ADMIN});
+  const lineas = await leerEstadoBancario(new File(['Fecha,Descripcion,Credito\n2026-09-07,Deposito,100'],'iso.csv'));
+  const [linea] = await construirLineasConMoneda(db,lineas,'USD');
+  assert.equal(linea.tasaCambio,'36.500000');
+  assert.equal(linea.creditoNio,'3650.00');
+  assert.equal(periodoDesdeFecha(resumenEstadoBancario(lineas).periodoFin),'2026-09');
+});
+
+test('auto-enlace y anulación concurrentes conservan integridad', async () => {
+  const e = await escenario('CARRERA-AUTO');
+  // Aislar fecha para asegurar un único candidato automático.
+  await db.update(schema.movimientosCuentas).set({fecha:'2026-04-11'}).where(eq(schema.movimientosCuentas.id,e.movimiento.id));
+  await db.update(schema.lineasReporteBancario).set({fecha:'2026-04-11'}).where(eq(schema.lineasReporteBancario.id,e.linea.id));
+  const {anular,enviar} = await rutas();
+  await Promise.all([
+    autoConciliar(db,e.reporte.id,CUENTA_USD,'usr-banco'),
+    enviar(anular,e.movimiento.id,{estado:'anulado',motivo:'Anulación simultánea con automático'}),
+  ]);
+  const [m] = await db.select().from(schema.movimientosCuentas).where(eq(schema.movimientosCuentas.id,e.movimiento.id));
+  const [l] = await db.select().from(schema.lineasReporteBancario).where(eq(schema.lineasReporteBancario.id,e.linea.id));
+  assert.ok(m.estado!=='anulado' || l.movimientoId===null);
 });

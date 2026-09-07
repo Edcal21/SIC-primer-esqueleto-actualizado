@@ -1,7 +1,8 @@
 import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import * as XLSX from "xlsx";
 import type { getDb } from "../db";
-import { conciliacionesBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../db/schema";
+import { conciliacionesBancarias, cuentasBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../db/schema";
+import { conBloqueoConciliacion } from "./conciliacion-lock";
 import { calcularEquivalenteNio, sumarMontos } from "./moneda";
 import { obtenerTasaVigente } from "./tasas";
 
@@ -84,17 +85,14 @@ export function valorFecha(value: unknown): string | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
   const raw = valorTexto(value);
   if (!raw) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const separado = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
-  if (separado) {
-    const [, dia, mes, anioRaw] = separado;
-    const anio = anioRaw.length === 2 ? `20${anioRaw}` : anioRaw;
-    const fecha = new Date(Date.UTC(Number(anio), Number(mes) - 1, Number(dia)));
-    if (Number.isNaN(fecha.getTime())) return null;
-    return fecha.toISOString().slice(0, 10);
-  }
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const local = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (!iso && !local) return null;
+  // Fechas con separadores locales siempre son día/mes/año, nunca mes/día.
+  const [anio, mes, dia] = iso ? iso.slice(1).map(Number) : [Number(local![3]), Number(local![2]), Number(local![1])];
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+  if (fecha.getUTCFullYear() !== anio || fecha.getUTCMonth() !== mes - 1 || fecha.getUTCDate() !== dia) return null;
+  return fecha.toISOString().slice(0, 10);
 }
 
 function buscarValor(row: RawRow, aliases: string[]) {
@@ -139,7 +137,9 @@ function extraerLineas(hoja: HojaBancaria): LineaEstadoBancario[] {
   const parsed = hoja.filas.map((row, index) => {
     const descripcion = valorTexto(buscarValor(row, headerAliases.descripcion));
     const referencia = valorTexto(buscarValor(row, headerAliases.referencia));
-    const fecha = valorFecha(buscarValor(row, headerAliases.fecha));
+    const fechaCelda = buscarValor(row, headerAliases.fecha);
+    const fecha = valorFecha(fechaCelda);
+    if (valorTexto(fechaCelda) && !fecha) throw new Error(`Fila ${hoja.primeraFilaDatos + index}: fecha inválida; use AAAA-MM-DD o DD/MM/AAAA`);
     const debitoCelda = buscarValor(row, headerAliases.debito);
     const creditoCelda = buscarValor(row, headerAliases.credito);
     const montoCelda = buscarValor(row, headerAliases.monto);
@@ -184,10 +184,10 @@ function extraerLineas(hoja: HojaBancaria): LineaEstadoBancario[] {
 
 export async function leerEstadoBancario(archivo: File): Promise<LineaEstadoBancario[]> {
   const buffer = await archivo.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("El archivo no contiene hojas para procesar");
-  const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd" });
+  const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
   if (!rows.length) throw new Error(`La hoja "${sheetName}" del archivo está vacía`);
   return extraerLineas(filasConEncabezado(rows));
 }
@@ -292,7 +292,8 @@ export async function movimientosConciliables(db: Db, cuentaBancariaNumero: stri
   });
 }
 
-const mismoMonto = (linea: { debito: string; credito: string }, movimiento: MovimientoConciliable) =>
+export const mismoMonto = (linea: { debito: string; credito: string; moneda: string }, movimiento: MovimientoConciliable) =>
+  linea.moneda === movimiento.moneda && (linea.moneda === "NIO" || movimiento.completo) &&
   Math.abs(Math.abs(Number(linea.credito) - Number(linea.debito)) - movimiento.montoOriginal) < 0.01;
 
 /** Una línea USD sin tasa registrada para su fecha está pendiente de completar: no se infiere el
@@ -307,23 +308,27 @@ export const estaPendienteDeTasa = (linea: { moneda: string; tasaCambio: string 
  * llamar cuantas veces sea necesario; es un no-op para las líneas que ya están completas.
  */
 export async function completarLineasPendientesDeTasa(db: Db, reporteId: string): Promise<number> {
-  const pendientes = await db.select().from(lineasReporteBancario)
-    .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.moneda, "USD"), isNull(lineasReporteBancario.tasaCambio)));
-  const conFecha = pendientes.filter((linea): linea is typeof linea & { fecha: string } => Boolean(linea.fecha));
-  if (!conFecha.length) return 0;
+  return conBloqueoConciliacion(db, async db => {
+    const [revision] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.reporteId, reporteId)).limit(1);
+    if (revision && revision.estado !== "borrador") return 0;
+    const pendientes = await db.select().from(lineasReporteBancario)
+      .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.moneda, "USD"), isNull(lineasReporteBancario.tasaCambio)));
+    const conFecha = pendientes.filter((linea): linea is typeof linea & { fecha: string } => Boolean(linea.fecha));
+    if (!conFecha.length) return 0;
 
-  let completadas = 0;
-  for (const linea of conFecha) {
-    const tasa = await obtenerTasaVigente(db, linea.fecha);
-    if (!tasa) continue;
-    await db.update(lineasReporteBancario).set({
-      tasaCambio: tasa.tasa,
-      debitoNio: calcularEquivalenteNio(linea.debito, tasa.tasa),
-      creditoNio: calcularEquivalenteNio(linea.credito, tasa.tasa),
-    }).where(eq(lineasReporteBancario.id, linea.id));
-    completadas += 1;
-  }
-  return completadas;
+    let completadas = 0;
+    for (const linea of conFecha) {
+      const tasa = await obtenerTasaVigente(db, linea.fecha);
+      if (!tasa) continue;
+      await db.update(lineasReporteBancario).set({
+        tasaCambio: tasa.tasa,
+        debitoNio: calcularEquivalenteNio(linea.debito, tasa.tasa),
+        creditoNio: calcularEquivalenteNio(linea.credito, tasa.tasa),
+      }).where(eq(lineasReporteBancario.id, linea.id));
+      completadas += 1;
+    }
+    return completadas;
+  });
 }
 
 /**
@@ -332,63 +337,72 @@ export async function completarLineasPendientesDeTasa(db: Db, reporteId: string)
  * la trae. Nunca decide entre empates ni enlaza líneas USD pendientes de completar su tasa.
  */
 export async function autoConciliar(db: Db, reporteId: string, cuentaBancariaNumero: string, usuarioId: string) {
-  await completarLineasPendientesDeTasa(db, reporteId);
+  return conBloqueoConciliacion(db, async db => {
+    const [revision] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.reporteId, reporteId)).limit(1);
+    if (revision && revision.estado !== "borrador") return 0;
+    await completarLineasPendientesDeTasa(db, reporteId);
 
-  const todasLasPendientes = await db.select().from(lineasReporteBancario)
-    .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.estadoConciliacion, "pendiente")))
-    .orderBy(asc(lineasReporteBancario.numeroLinea));
-  const lineas = todasLasPendientes.filter(linea => !estaPendienteDeTasa(linea));
-  if (!lineas.length) return 0;
+    const [cuenta] = await db.select().from(cuentasBancarias).where(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero)).limit(1);
+    if (!cuenta) return 0;
+    const todasLasPendientes = await db.select().from(lineasReporteBancario)
+      .where(and(eq(lineasReporteBancario.reporteId, reporteId), eq(lineasReporteBancario.estadoConciliacion, "pendiente")))
+      .orderBy(asc(lineasReporteBancario.numeroLinea));
+    const lineas = todasLasPendientes.filter(linea => linea.moneda === cuenta.moneda && !estaPendienteDeTasa(linea));
+    if (!lineas.length) return 0;
 
-  const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
-  const movimientos = await movimientosConciliables(db, cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
-  const disponibles = movimientos.filter(movimiento => !movimiento.lineaId);
-  const usados = new Set<string>();
-  let conciliadas = 0;
+    const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
+    const movimientos = await movimientosConciliables(db, cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
+    const disponibles = movimientos.filter(movimiento => !movimiento.lineaId);
+    const usados = new Set<string>();
+    let conciliadas = 0;
 
-  for (const linea of lineas) {
-    const candidatos = disponibles.filter(movimiento => !usados.has(movimiento.id)
-      && mismoMonto(linea, movimiento)
-      && (!linea.fecha || movimiento.fecha === linea.fecha));
-    if (candidatos.length !== 1) continue;
-    const [movimiento] = candidatos;
-    await db.update(lineasReporteBancario)
-      .set({ estadoConciliacion: "conciliada", movimientoId: movimiento.id, conciliadoPor: usuarioId, conciliadoEn: new Date() })
-      .where(eq(lineasReporteBancario.id, linea.id));
-    usados.add(movimiento.id);
-    conciliadas += 1;
-  }
+    for (const linea of lineas) {
+      const candidatos = disponibles.filter(movimiento => !usados.has(movimiento.id)
+        && mismoMonto(linea, movimiento)
+        && (!linea.fecha || movimiento.fecha === linea.fecha));
+      if (candidatos.length !== 1) continue;
+      const [movimiento] = candidatos;
+      await db.update(lineasReporteBancario)
+        .set({ estadoConciliacion: "conciliada", movimientoId: movimiento.id, conciliadoPor: usuarioId, conciliadoEn: new Date() })
+        .where(eq(lineasReporteBancario.id, linea.id));
+      usados.add(movimiento.id);
+      conciliadas += 1;
+    }
 
-  return conciliadas;
+    return conciliadas;
+  });
 }
 
 /** Recalcula los totales de la conciliación a partir de las líneas y de los movimientos del período.
  *  Los totales quedan expresados en la moneda original de la cuenta bancaria (nunca se mezclan
  *  monedas ni se convierte todo el estado con una tasa única). */
 export async function recalcularConciliacion(db: Db, conciliacionId: string) {
-  const [conciliacion] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.id, conciliacionId)).limit(1);
-  if (!conciliacion) return null;
+  return conBloqueoConciliacion(db, async db => {
+    const [conciliacion] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.id, conciliacionId)).limit(1);
+    if (!conciliacion) return null;
+    if (conciliacion.estado !== "borrador") return conciliacion;
 
-  await completarLineasPendientesDeTasa(db, conciliacion.reporteId);
+    await completarLineasPendientesDeTasa(db, conciliacion.reporteId);
 
-  const lineas = await db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId));
-  const neto = (linea: typeof lineas[number]) => Number(linea.credito) - Number(linea.debito);
-  const totalBanco = lineas.reduce((total, linea) => total + neto(linea), 0);
-  const conciliadas = lineas.filter(linea => linea.estadoConciliacion === "conciliada");
-  const totalConciliado = conciliadas.reduce((total, linea) => total + neto(linea), 0);
-  const pendientes = lineas.filter(linea => linea.estadoConciliacion === "pendiente");
+    const lineas = await db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId));
+    const neto = (linea: typeof lineas[number]) => Number(linea.credito) - Number(linea.debito);
+    const totalBanco = lineas.reduce((total, linea) => total + neto(linea), 0);
+    const conciliadas = lineas.filter(linea => linea.estadoConciliacion === "conciliada");
+    const totalConciliado = conciliadas.reduce((total, linea) => total + neto(linea), 0);
+    const pendientes = lineas.filter(linea => linea.estadoConciliacion === "pendiente");
 
-  const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
-  const movimientos = await movimientosConciliables(db, conciliacion.cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
+    const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
+    const movimientos = await movimientosConciliables(db, conciliacion.cuentaBancariaNumero, fechas[0] ?? null, fechas[fechas.length - 1] ?? null);
 
-  const [actualizada] = await db.update(conciliacionesBancarias).set({
-    totalBanco: totalBanco.toFixed(2),
-    totalConciliado: totalConciliado.toFixed(2),
-    totalPendiente: (totalBanco - totalConciliado).toFixed(2),
-    lineasConciliadas: conciliadas.length,
-    lineasPendientes: pendientes.length,
-    movimientosSinConciliar: movimientos.filter(movimiento => !movimiento.lineaId).length,
-  }).where(eq(conciliacionesBancarias.id, conciliacionId)).returning();
+    const [actualizada] = await db.update(conciliacionesBancarias).set({
+      totalBanco: totalBanco.toFixed(2),
+      totalConciliado: totalConciliado.toFixed(2),
+      totalPendiente: (totalBanco - totalConciliado).toFixed(2),
+      lineasConciliadas: conciliadas.length,
+      lineasPendientes: pendientes.length,
+      movimientosSinConciliar: movimientos.filter(movimiento => !movimiento.lineaId).length,
+    }).where(eq(conciliacionesBancarias.id, conciliacionId)).returning();
 
-  return actualizada;
+    return actualizada;
+  });
 }

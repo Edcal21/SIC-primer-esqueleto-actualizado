@@ -1,8 +1,9 @@
+import { conBloqueoConciliacion, esConflictoContable } from "../../../../lib/conciliacion-lock";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
 import { registrarAdvertenciaSegregacionConciliacion, registrarAuditoria } from "../../../../lib/auditoria";
-import { estaPendienteDeTasa, movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
+import { estaPendienteDeTasa, mismoMonto, movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
 
 type AccionConciliacion = "conciliar" | "descartar" | "reabrir" | "aprobar" | "rechazar";
@@ -93,10 +94,15 @@ async function actualizarLinea(
     if (!movimientoId) return jsonError("Seleccione el movimiento contable a enlazar", 400);
     const [movimiento] = await db.select().from(movimientosCuentas).where(eq(movimientosCuentas.id, movimientoId)).limit(1);
     if (!movimiento) return jsonError("Movimiento contable no encontrado", 404);
-    if (movimiento.estado !== "registrado") return jsonError("El movimiento está anulado y no puede conciliarse", 400);
+    if (movimiento.estado !== "registrado") return jsonError("El movimiento está anulado y no puede conciliarse", 409);
     if (movimiento.cuentaBancariaNumero !== conciliacion.cuentaBancariaNumero) {
       return jsonError("El movimiento pertenece a otra cuenta bancaria", 400);
     }
+    const [cuenta] = await db.select().from(cuentasBancarias).where(eq(cuentasBancarias.numeroCuenta, conciliacion.cuentaBancariaNumero)).limit(1);
+    if (!cuenta || cuenta.moneda !== linea.moneda) return jsonError("La moneda de la línea no coincide con la cuenta bancaria", 409);
+    const candidatos = await movimientosConciliables(db, conciliacion.cuentaBancariaNumero, movimiento.fecha, movimiento.fecha);
+    const candidato = candidatos.find(item => item.id === movimientoId);
+    if (!candidato || !mismoMonto(linea, candidato)) return jsonError("Moneda, importe o datos históricos incompatibles con la línea bancaria", 409);
     const [ocupada] = await db.select({ id: lineasReporteBancario.id }).from(lineasReporteBancario)
       .where(eq(lineasReporteBancario.movimientoId, movimientoId)).limit(1);
     if (ocupada && ocupada.id !== lineaId) return jsonError("El movimiento ya está enlazado con otra línea bancaria", 409);
@@ -142,6 +148,12 @@ async function revisar(
   const observaciones = body.observaciones?.trim() || null;
   if (accion === "rechazar" && !observaciones) return jsonError("Indique el motivo del rechazo", 400);
 
+  if (accion === "aprobar") {
+    const data = await detalle(db, conciliacion.id);
+    if (!data || data.lineas.some(linea => linea.moneda !== data.conciliacion.cuentaBancariaMoneda || estaPendienteDeTasa(linea) || (linea.estadoConciliacion === "conciliada" && (!linea.movimiento || !mismoMonto(linea, linea.movimiento))))) {
+      return jsonError("No se puede aprobar: existen líneas sin tasa o enlaces incompatibles/incompletos", 409);
+    }
+  }
   const actual = await recalcularConciliacion(db, conciliacion.id);
   if (accion === "aprobar" && actual && actual.lineasPendientes > 0) {
     return jsonError(`No se puede aprobar: quedan ${actual.lineasPendientes} líneas bancarias sin conciliar ni descartar`, 400);
@@ -198,11 +210,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const db = getDb();
   try {
-    const conciliacion = await cargarConciliacion(db, id);
-    if (!conciliacion) return jsonError("Conciliación no encontrada", 404);
-    if (accion === "aprobar" || accion === "rechazar") return await revisar(db, user, conciliacion, accion, body);
-    return await actualizarLinea(db, user, conciliacion, accion, body);
+    return await conBloqueoConciliacion(db, async db => {
+      const conciliacion = await cargarConciliacion(db, id);
+      if (!conciliacion) return jsonError("Conciliación no encontrada", 404);
+      if (accion === "aprobar" || accion === "rechazar") return await revisar(db, user, conciliacion, accion, body);
+      return await actualizarLinea(db, user, conciliacion, accion, body);
+    });
   } catch (error) {
+    if (esConflictoContable(error)) return jsonError("Conflicto contable: actualice la pantalla y vuelva a intentar", 409);
     console.error("Reconciliation update failed", error);
     return jsonError("No se pudo actualizar la conciliación", 500);
   }

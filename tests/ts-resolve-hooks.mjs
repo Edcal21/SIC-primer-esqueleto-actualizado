@@ -6,6 +6,9 @@ import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === "cloudflare:workers" && process.env.SIC_TEST_WORKER_ENV === "true") {
+    return { url: "data:text/javascript,export const env = process.env;", shortCircuit: true };
+  }
   const esRelativo = specifier.startsWith("./") || specifier.startsWith("../");
   const sinExtension = esRelativo && !/\.[a-zA-Z0-9]+$/.test(specifier);
   if (!sinExtension) return nextResolve(specifier, context);
