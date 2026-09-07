@@ -8,6 +8,7 @@ Estado revisado: 2026-09-07.
 - Catalogo contable y actualizacion de cuentas.
 - Iglesias activas usadas en registro de movimientos y CRUD administrativo de iglesias.
 - Movimientos contables y detalle debito/credito, con consulta y anulacion desde la pantalla Minutas.
+- Integridad contable de minutas con trigger diferible de partida doble e indice unico parcial en PostgreSQL.
 - Restablecimiento de contrasenas de usuarios desde la pantalla de administracion.
 - Importaciones de balanza de comprobacion.
 - Reportes financieros generados desde balanzas importadas.
@@ -64,4 +65,3 @@ desde la pantalla de usuarios.
 - Conversion de moneda para cuentas bancarias en dolares.
 - Retencion del archivo bancario original ademas de sus lineas interpretadas.
 - Parametros contables por periodo, como cierre mensual.
-- Restriccion de partida doble como constraint de PostgreSQL, hoy validada en interfaz y API.

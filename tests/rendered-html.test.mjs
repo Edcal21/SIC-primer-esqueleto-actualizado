@@ -134,3 +134,18 @@ test("movement annulment preserves accounting detail", async () => {
   assert.match(anular, /registrarAuditoria/, "la anulación debe auditarse");
   assert.doesNotMatch(anular, /delete\(detallesMovimientos\)|delete\(movimientosCuentas\)/, "la anulación nunca borra el asiento ni su detalle");
 });
+
+test("database protects accounting entries with double-entry and duplicate constraints", async () => {
+  const [schema, migration, movimientos] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0020_partida_doble_unique_minuta.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/movimientos/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(schema, /ux_movimientos_unico/, "el esquema debe documentar el índice único parcial de minutas");
+  assert.match(migration, /CREATE OR REPLACE FUNCTION validar_partida_doble_movimiento/, "la migración debe crear la función de validación contable");
+  assert.match(migration, /DEFERRABLE INITIALLY DEFERRED/, "el trigger debe diferirse hasta terminar la transacción");
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS ux_movimientos_unico/, "la migración debe crear el índice único parcial");
+  assert.match(movimientos, /23505/, "la API debe traducir duplicados de BD a una respuesta clara");
+  assert.match(movimientos, /23514/, "la API debe traducir violaciones contables de BD a una respuesta clara");
+});

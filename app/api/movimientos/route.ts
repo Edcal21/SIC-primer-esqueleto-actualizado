@@ -127,6 +127,12 @@ export async function POST(request: Request) {
     return Response.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Movement creation failed", error);
+    if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+      return jsonError("Ya existe una minuta registrada con la misma fecha, iglesia, cuenta bancaria y referencia", 409);
+    }
+    if (error && typeof error === "object" && "code" in error && error.code === "23514") {
+      return jsonError("La minuta no cumple las reglas contables de partida doble", 400);
+    }
     return jsonError("No se pudo guardar el movimiento", 500);
   }
 }

@@ -98,6 +98,7 @@ export const movimientosCuentas = pgTable("movimientos_cuentas", {
   index("idx_movimientos_cuentas_cuenta_bancaria").on(table.cuentaBancariaNumero),
   index("idx_movimientos_cuentas_referencia").on(table.referencia),
   index("idx_movimientos_cuentas_estado").on(table.estado),
+  uniqueIndex("ux_movimientos_unico").on(table.fecha, table.iglesiaCodigo, table.cuentaBancariaNumero, table.referencia).where(sql`${table.estado} = 'registrado'`),
   check("ck_movimientos_cuentas_estado", sql`${table.estado} in ('registrado', 'anulado')`),
 ]);
 

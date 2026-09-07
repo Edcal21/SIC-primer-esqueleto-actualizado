@@ -123,6 +123,10 @@ de al menos 10 caracteres y queda registrada en auditoría con el monto y el mot
 Una minuta enlazada a una línea de conciliación bancaria no se puede anular: primero debe deshacerse el enlace
 desde la pantalla de conciliación, para que los totales conciliados nunca queden apuntando a un asiento anulado.
 
+La base de datos también protege la integridad contable: `0020_partida_doble_unique_minuta` crea triggers
+diferibles que rechazan minutas registradas sin partida doble y un índice único parcial que evita duplicar una
+minuta vigente con la misma fecha, iglesia, cuenta bancaria y referencia.
+
 ## Bancos y conciliación bancaria
 
 El estado de cuenta se procesa en el momento de la carga: `lib/banco.ts` interpreta CSV, XLS y XLSX y
