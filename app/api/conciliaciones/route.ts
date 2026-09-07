@@ -5,6 +5,7 @@ import { conciliacionesBancarias, cuentasBancarias, reportesBancarios } from "..
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { autoConciliar, periodoDesdeFecha, recalcularConciliacion } from "../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
+import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../lib/periodos";
 
 type ConciliacionPayload = { reporteId?: string };
 
@@ -87,6 +88,8 @@ export async function POST(request: Request) {
       if (existente) return jsonError("Este reporte bancario ya tiene una conciliación generada", 409);
 
       const periodo = periodoDesdeFecha(reporte.periodoFin ?? reporte.periodoInicio ?? reporte.fecha);
+      const periodoCerrado = await primerPeriodoCerrado(db, [periodo]);
+      if (periodoCerrado) return jsonError(mensajePeriodoCerrado(periodoCerrado), 409);
 
       const [conciliacion] = await db.insert(conciliacionesBancarias).values({
         reporteId: reporte.id,

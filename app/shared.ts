@@ -5,6 +5,13 @@ export type LineaBanco = { id: string; numeroLinea: number; fecha: string | null
 export type MovimientoConciliable = { id: string; fecha: string; referencia: string | null; concepto: string; monto: number; montoOriginal: number; moneda: "USD" | "NIO"; sentido: "entrada" | "salida" | null; completo: boolean; lineaId: string | null };
 export type LineaConciliacion = LineaBanco & { movimiento: MovimientoConciliable | null };
 export type Conciliacion = { id: string; reporteId: string; cuentaBancariaNumero: string; cuentaBancariaNombre?: string | null; cuentaBancariaMoneda?: "USD" | "NIO" | null; periodo: string; estado: "borrador" | "aprobada" | "rechazada"; totalBanco: string; totalConciliado: string; totalPendiente: string; lineasConciliadas: number; lineasPendientes: number; movimientosSinConciliar: number; observaciones?: string | null; creadoEn: string; revisadoPorNombre?: string | null; revisadoEn?: string | null; reporteNombre?: string | null };
+export type EstadoPeriodo = "abierto" | "revision" | "cerrado";
+export type PeriodoContable = { periodo: string; estado: EstadoPeriodo; fechaApertura: string; fechaCierre: string | null; cerradoPor: string | null; cerradoPorNombre: string | null; reabiertoPor: string | null; reabiertoPorNombre: string | null; reabiertoEn: string | null; motivoReapertura: string | null; creadoEn: string; actualizadoEn: string };
+export type ImpedimentoCierre = { motivo: string; detalle: string };
+/** Un período solo bloquea cuando está explícitamente cerrado; si no está en la lista, está abierto. */
+export const periodoCerrado = (periodos: PeriodoContable[], periodo: string) =>
+  periodos.some(item => item.periodo === periodo && item.estado === "cerrado");
+export const periodoDeFechaUi = (fecha: string) => fecha.slice(0, 7);
 export type TasaCambio = { id: string; fecha: string; moneda: "USD"; tasa: string; fuente: string; creadoPor: string; creadoEn: string; actualizadoPor?: string | null; actualizadoEn?: string | null };
 /** Formatea un importe en su propia moneda (USD o NIO); usar en vez de `dinero` cuando el valor no está garantizado en córdobas. */
 export const formatoMonedaPorTipo: Record<"USD" | "NIO", Intl.NumberFormat> = {
@@ -62,12 +69,13 @@ export const menu = [
   { nombre: "Importaciones", permiso: "importaciones:administrar" as Permiso, icono: "upload" },
   { nombre: "Reportes", permiso: "reportes:ver" as Permiso, icono: "reports" },
   { nombre: "Auditoría", permiso: "auditoria:ver" as Permiso, icono: "audit" },
+  { nombre: "Cierre contable", permiso: "configuracion:administrar" as Permiso, icono: "audit" },
   { nombre: "Configuración", permiso: "configuracion:administrar" as Permiso, icono: "settings" },
 ];
 export const menuGroups = [
   { label: "Operativa", items: ["Resumen", "Registrar movimiento", "Minutas", "Bancos", "Conciliación"] },
   { label: "Reportes", items: ["Importaciones", "Reportes"] },
-  { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Iglesias", "Auditoría", "Configuración"] },
+  { label: "Gestión", items: ["Usuarios", "Catálogo contable", "Iglesias", "Cierre contable", "Auditoría", "Configuración"] },
 ];
 export const defaultConfig: ConfiguracionSistema = { institucionNombre: "Universal Nicaragua", sistemaNombre: "SIC", sistemaDescripcion: "Sistema de Información Contable", moneda: "NIO", logoLogin: "/universal-nicaragua-login.png" };
 

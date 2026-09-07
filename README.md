@@ -229,6 +229,35 @@ vigente, sin perder nunca el importe original.
   política contable para reconocer esa diferencia cambiaria (cuenta contable, periodicidad, aprobación)
   queda pendiente de definir con contabilidad antes de automatizarla.
 
+## Cierre contable por período
+
+Cada mes es un período contable (`periodos_contables`, pantalla **Cierre contable**, permiso
+`configuracion:administrar`) con tres estados: `abierto`, `revision` y `cerrado`. "Reabierto" no es
+un estado propio: al reabrir, el período vuelve a `abierto` y conserva quién lo reabrió, cuándo y
+por qué.
+
+**Un período cerrado bloquea**, siempre que la fecha del hecho caiga dentro de él: registro y
+anulación de minutas, importación de balanza, carga de estados de cuenta, generación y aprobación
+de conciliaciones, y registro de tasas de cambio. Un estado de cuenta que cruza el cierre de mes se
+rechaza si cualquiera de los meses que toca está cerrado.
+
+**La ausencia de fila significa abierto.** La migración `0022_periodos_contables` crea la tabla
+vacía a propósito: nada de lo registrado antes de este módulo queda bloqueado retroactivamente. Un
+período solo restringe operaciones cuando alguien lo cierra explícitamente. `revision` señala que el
+período se está revisando, pero no bloquea.
+
+**No se puede cerrar** un período con conciliaciones bancarias en borrador o rechazadas, ni con
+balanza importada con diferencias. El sistema devuelve todos los impedimentos juntos, con el detalle
+de cuáles son, en vez de descubrirlos de a uno.
+
+**Reabrir** exige el permiso administrativo y un motivo de al menos 15 caracteres. La reapertura
+levanta el candado y nada más: no borra ni recalcula ninguna información histórica. El cierre, el
+intento de cierre rechazado y la reapertura quedan en auditoría con usuario, fecha y motivo.
+
+Las transiciones se ejecutan bajo el mismo bloqueo de conciliación (`lib/conciliacion-lock.ts`) que
+usan las escrituras contables: cerrar comprueba el estado de las conciliaciones del período, así que
+no puede correr en paralelo con una aprobación que cambiaría justo esa comprobación.
+
 ## Estructura
 
 ```text
@@ -269,6 +298,8 @@ tests/               Pruebas automatizadas
 | `/api/cuentas-bancarias` | `GET`, `POST` | Consulta y crea cuentas bancarias institucionales. |
 | `/api/cuentas-bancarias/:numeroCuenta` | `PATCH` | Actualiza nombre, moneda o estado de una cuenta bancaria; rechaza el cambio de moneda si ya tiene minutas o estados de cuenta. |
 | `/api/tasas-cambio` | `GET`, `POST` | Consulta el catálogo de tasas USD → NIO o registra la tasa de una fecha. |
+| `/api/periodos` | `GET`, `POST` | Consulta el control de períodos contables o abre uno nuevo. |
+| `/api/periodos/:periodo` | `PATCH` | Marca en revisión, cierra o reabre un período (la reapertura exige motivo). |
 | `/api/tasas-cambio/:id` | `PATCH` | Corrige una tasa ya catalogada (no recalcula movimientos que ya la aplicaron). |
 | `/api/configuracion` | `GET`, `PUT` | Consulta y edita la configuración institucional. |
 | `/api/catalogo/cuentas` | `GET`, `POST` | Consulta y crea cuentas contables. |

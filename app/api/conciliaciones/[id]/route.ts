@@ -5,6 +5,7 @@ import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movim
 import { registrarAdvertenciaSegregacionConciliacion, registrarAuditoria } from "../../../../lib/auditoria";
 import { estaPendienteDeTasa, mismoMonto, movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
+import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../../lib/periodos";
 
 type AccionConciliacion = "conciliar" | "descartar" | "reabrir" | "aprobar" | "rechazar";
 type ConciliacionUpdatePayload = {
@@ -77,6 +78,9 @@ async function actualizarLinea(
   if (!puede(user, "banco:cargar")) return jsonError("No tiene permiso para modificar líneas de conciliación", 403);
   if (conciliacion.estado !== "borrador") return jsonError("La conciliación ya fue revisada y no admite cambios", 409);
 
+  const periodoCerradoLinea = await primerPeriodoCerrado(db, [conciliacion.periodo]);
+  if (periodoCerradoLinea) return jsonError(mensajePeriodoCerrado(periodoCerradoLinea), 409);
+
   const lineaId = body.lineaId?.trim();
   if (!lineaId) return jsonError("Indique la línea del estado bancario", 400);
   const [linea] = await db.select().from(lineasReporteBancario)
@@ -143,6 +147,8 @@ async function revisar(
   body: ConciliacionUpdatePayload,
 ) {
   if (!puede(user, "conciliacion:aprobar")) return jsonError("No tiene permiso para aprobar o rechazar conciliaciones", 403);
+  const periodoCerradoRevision = await primerPeriodoCerrado(db, [conciliacion.periodo]);
+  if (periodoCerradoRevision) return jsonError(mensajePeriodoCerrado(periodoCerradoRevision), 409);
   if (conciliacion.estado !== "borrador") return jsonError("La conciliación ya fue revisada", 409);
 
   const observaciones = body.observaciones?.trim() || null;

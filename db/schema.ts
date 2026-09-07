@@ -278,6 +278,35 @@ export const lineasReporteBancario = pgTable("lineas_reporte_bancario", {
   ),
 ]);
 
+/**
+ * Control de cierre contable. Un período existe en esta tabla solo cuando alguien lo administró:
+ * la ausencia de fila significa "abierto" (es el estado de todo lo registrado antes de este
+ * módulo), de modo que la migración no cierra retroactivamente nada. "reabierto" no es un estado
+ * propio: al reabrir, el período vuelve a `abierto` y conserva quién y por qué lo reabrió.
+ */
+export const periodosContables = pgTable("periodos_contables", {
+  periodo: varchar("periodo", { length: 7 }).primaryKey().notNull(),
+  estado: varchar("estado", { length: 8, enum: ["abierto", "revision", "cerrado"] }).notNull().default("abierto"),
+  fechaApertura: timestamp("fecha_apertura", { withTimezone: true }).notNull().defaultNow(),
+  fechaCierre: timestamp("fecha_cierre", { withTimezone: true }),
+  cerradoPor: varchar("cerrado_por", { length: 40 }).references(() => usuarios.id),
+  cerradoPorNombre: text("cerrado_por_nombre"),
+  reabiertoPor: varchar("reabierto_por", { length: 40 }).references(() => usuarios.id),
+  reabiertoPorNombre: text("reabierto_por_nombre"),
+  reabiertoEn: timestamp("reabierto_en", { withTimezone: true }),
+  motivoReapertura: text("motivo_reapertura"),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_periodos_contables_estado").on(table.estado),
+  check("ck_periodos_contables_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("ck_periodos_contables_estado", sql`${table.estado} in ('abierto', 'revision', 'cerrado')`),
+  // Un período cerrado siempre sabe cuándo y quién lo cerró; uno no cerrado no arrastra esos datos.
+  check("ck_periodos_contables_cierre", sql`(${table.estado} = 'cerrado') = (${table.fechaCierre} is not null and ${table.cerradoPor} is not null)`),
+  // Si se registró una reapertura, quedan su autor, su fecha y su motivo: nunca uno sin los otros.
+  check("ck_periodos_contables_reapertura", sql`(${table.reabiertoPor} is null) = (${table.motivoReapertura} is null) and (${table.reabiertoPor} is null) = (${table.reabiertoEn} is null)`),
+]);
+
 export const tasasCambio = pgTable("tasas_cambio", {
   id: uuid("id").primaryKey().defaultRandom(),
   fecha: date("fecha").notNull(),

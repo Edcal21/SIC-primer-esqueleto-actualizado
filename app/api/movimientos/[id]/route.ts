@@ -1,4 +1,5 @@
 import { conBloqueoConciliacion, esConflictoContable } from "../../../../lib/conciliacion-lock";
+import { verificarPeriodosAbiertos } from "../../../../lib/periodos";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { conciliacionesBancarias, detallesMovimientos, lineasReporteBancario, movimientosCuentas } from "../../../../db/schema";
@@ -35,6 +36,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const [movimiento] = await db.select().from(movimientosCuentas).where(eq(movimientosCuentas.id, id)).limit(1);
       if (!movimiento) return jsonError("Movimiento no encontrado", 404);
       if (movimiento.estado === "anulado") return jsonError("El movimiento ya está anulado", 409);
+
+      // La minuta pertenece al período de su fecha: si ese período está cerrado, anularla lo alteraría.
+      const bloqueo = await verificarPeriodosAbiertos(db, [movimiento.fecha]);
+      if (bloqueo) return jsonError(bloqueo.mensaje, 409);
 
       const [enlace] = await db.select({
         lineaId: lineasReporteBancario.id,

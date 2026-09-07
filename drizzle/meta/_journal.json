@@ -155,6 +155,13 @@
       "when": 1788771600000,
       "tag": "0021_moneda_usd_nio",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788782400000,
+      "tag": "0022_periodos_contables",
+      "breakpoints": true
     }
   ]
 }

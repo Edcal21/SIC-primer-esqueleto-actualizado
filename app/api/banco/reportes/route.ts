@@ -5,6 +5,7 @@ import { registrarAuditoria } from "../../../../lib/auditoria";
 import { construirLineasConMoneda, leerEstadoBancario, resumenEstadoBancario, type LineaEstadoBancario } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { verificarRateLimit } from "../../../../lib/security";
+import { verificarPeriodosAbiertos } from "../../../../lib/periodos";
 
 const serializar = (row: typeof reportesBancarios.$inferSelect) => ({
   id: row.id,
@@ -101,6 +102,9 @@ export async function POST(request: Request) {
   }
 
   const resumen = resumenEstadoBancario(lineas);
+  // Un estado de cuenta puede cruzar el cierre de mes: se rechaza si toca algún período cerrado.
+  const bloqueo = await verificarPeriodosAbiertos(db, lineas.map(linea => linea.fecha));
+  if (bloqueo) return jsonError(bloqueo.mensaje, 409);
   // Cada línea resuelve su propia tasa por fecha en el catálogo; nunca se convierte todo el
   // estado de cuenta con una tasa única. Las líneas USD sin tasa registrada para su fecha quedan
   // guardadas como pendientes de completar (nunca se infiere el valor).

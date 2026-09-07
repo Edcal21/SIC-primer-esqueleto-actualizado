@@ -5,6 +5,7 @@ import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 import { construirDetallesMovimiento, type DetalleEntrada } from "../../../lib/movimientos";
 import { obtenerTasaVigente } from "../../../lib/tasas";
+import { verificarPeriodosAbiertos } from "../../../lib/periodos";
 
 type DetallePayload = DetalleEntrada;
 
@@ -63,6 +64,9 @@ export async function POST(request: Request) {
 
   const db = getDb();
   try {
+    const bloqueo = await verificarPeriodosAbiertos(db, [fecha]);
+    if (bloqueo) return jsonError(bloqueo.mensaje, 409);
+
     const [iglesia] = await db.select({ codigo: iglesias.codigo }).from(iglesias)
       .where(and(eq(iglesias.codigo, iglesiaCodigo), eq(iglesias.estado, "activa"))).limit(1);
     if (!iglesia) return jsonError("La iglesia seleccionada no existe o está inactiva", 400);

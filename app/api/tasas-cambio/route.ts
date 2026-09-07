@@ -2,6 +2,7 @@ import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 import { getDb } from "../../../db";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { crearTasa, listarTasas } from "../../../lib/tasas";
+import { verificarPeriodosAbiertos } from "../../../lib/periodos";
 
 type TasaPayload = { fecha?: string; tasa?: string | number; fuente?: string };
 
@@ -32,6 +33,10 @@ export async function POST(request: Request) {
   if (body.tasa === undefined || body.tasa === null || body.tasa === "") return jsonError("La tasa es obligatoria", 400);
 
   const db = getDb();
+  // Registrar la tasa de una fecha cambia cómo se convierten los movimientos de ese período.
+  const bloqueo = await verificarPeriodosAbiertos(db, [fecha]);
+  if (bloqueo) return jsonError(bloqueo.mensaje, 409);
+
   try {
     const tasa = await crearTasa(db, { fecha, tasa: body.tasa as string, fuente, usuarioId: user.id });
     await registrarAuditoria(db, {

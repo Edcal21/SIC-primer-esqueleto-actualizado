@@ -1,7 +1,7 @@
 "use client";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import MenuIcon from "../components/MenuIcon";
-import { dinero, type CuentaBancaria, type CuentaMovimiento, type DetalleMinuta, type Iglesia, type RequestConfirmation, type TasaCambio } from "../shared";
+import { dinero, periodoCerrado, periodoDeFechaUi, type CuentaBancaria, type CuentaMovimiento, type DetalleMinuta, type Iglesia, type PeriodoContable, type RequestConfirmation, type TasaCambio } from "../shared";
 
 const detallesIniciales = (): DetalleMinuta[] => [
   { tipo: "debito", cuentaCodigo: "", monto: "", afectaCuentaBancaria: true, montoOriginal: "" },
@@ -28,6 +28,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
   const [iglesias, setIglesias] = useState<Iglesia[]>([]);
   const [cuentasBancarias, setCuentasBancarias] = useState<CuentaBancaria[]>([]);
   const [tasas, setTasas] = useState<TasaCambio[]>([]);
+  const [periodos, setPeriodos] = useState<PeriodoContable[]>([]);
   const [fecha, setFecha] = useState(new Date().toLocaleDateString("en-CA"));
   const [cuentaBancariaNumero, setCuentaBancariaNumero] = useState("");
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -65,6 +66,15 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
   }, []);
 
   useEffect(() => {
+    fetch("/api/periodos")
+      .then(async response => {
+        const data = await response.json();
+        if (response.ok) setPeriodos(data.periodos ?? []);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     fetch("/api/tasas-cambio")
       .then(async response => {
         const data = await response.json();
@@ -76,6 +86,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
   const cuentaBancaria = cuentasBancarias.find(cuenta => cuenta.numeroCuenta === cuentaBancariaNumero);
   const esUsd = cuentaBancaria?.moneda === "USD";
   const tasaVigente = esUsd ? tasas.find(tasa => tasa.fecha === fecha) : undefined;
+  const periodoBloqueado = periodoCerrado(periodos, periodoDeFechaUi(fecha));
 
   function limpiarFormulario() {
     formRef.current?.reset();
@@ -89,6 +100,9 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
     event.preventDefault();
     setError("");
     const form = new FormData(event.currentTarget);
+    if (periodoBloqueado) {
+      return setError(`El período ${periodoDeFechaUi(fecha)} está cerrado. Un administrador debe reabrirlo desde Cierre contable antes de registrar minutas con esa fecha.`);
+    }
     if (!detalles.some(detalle => detalle.afectaCuentaBancaria)) {
       return setError("Marque al menos una línea como la que afecta la cuenta bancaria de la minuta");
     }
@@ -175,6 +189,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
       </div>
     </div>
     {!loading && !cuentas.length ? <div className="readOnlyBanner">No hay cuentas de movimiento activas. Cargue o habilite cuentas en el catálogo contable antes de registrar minutas.</div> : null}
+    {periodoBloqueado ? <div className="readOnlyBanner">El período contable {periodoDeFechaUi(fecha)} está cerrado: no se pueden registrar minutas con esa fecha. Un administrador puede reabrirlo desde Cierre contable indicando el motivo.</div> : null}
     {tasaFaltante ? <div className="readOnlyBanner">La cuenta bancaria seleccionada es USD y no hay tasa de cambio registrada para el {fecha}. Un administrador debe registrarla en Configuración → Tasas de cambio antes de guardar esta minuta.</div> : null}
     <form className="panel formPanel movementPanel" ref={formRef} onSubmit={guardar}>
       <section className="movementMeta">
@@ -221,7 +236,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
         {cuentas.length ? <div className="accountHint"><MenuIcon name="info" className="glyphIcon"/><span>{cuentas.length} cuentas de movimiento, {iglesias.length} iglesias y {cuentasBancarias.length} cuentas bancarias disponibles desde PostgreSQL.</span></div> : <span/>}
         <div className="formActions">
           <button className="secondary" type="button" onClick={limpiarFormulario} disabled={saving}>Limpiar formulario</button>
-          <button className="primary" type="submit" disabled={saving || loading || codigosInvalidos || !hayLineaBanco || tasaFaltante || !cuentas.length || !iglesias.length || !cuentasBancarias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button>
+          <button className="primary" type="submit" disabled={saving || loading || codigosInvalidos || !hayLineaBanco || tasaFaltante || periodoBloqueado || !cuentas.length || !iglesias.length || !cuentasBancarias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button>
         </div>
       </div>
     </form>
