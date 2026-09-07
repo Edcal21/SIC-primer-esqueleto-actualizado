@@ -1,0 +1,7 @@
+"use client";
+import { menu, menuGroups, nombresRol, type ConfiguracionSistema, type User } from "../shared";
+import MenuIcon from "./MenuIcon";
+
+export default function Sidebar({ user, active, allowedMenu, setActive, logout, config }: { user: User; active: string; allowedMenu: typeof menu; setActive: (value: string) => void; logout: () => void; config: ConfiguracionSistema }) {
+  return <aside className="sidebar"><div className="brand"><span className="brandMark logoMark" style={{ backgroundImage: `url(${config.logoLogin})` }} role="img" aria-label={config.institucionNombre}/><div><b>{config.sistemaNombre}</b><small>{config.institucionNombre}</small></div></div><nav aria-label="Navegación principal">{menuGroups.map(group=>{const items=allowedMenu.filter(item=>group.items.includes(item.nombre));return items.length?<section className="navSection" key={group.label}><p className="navLabel">{group.label}</p>{items.map(item=><button key={item.nombre} className={active===item.nombre?"navItem active":"navItem"} onClick={()=>setActive(item.nombre)}><MenuIcon name={item.icono}/><span>{item.nombre}</span></button>)}</section>:null;})}</nav><div className="sidebarFoot"><span className="avatar">{user.nombre.split(" ").map(word=>word[0]).slice(0,2).join("")}</span><div><b>{user.nombre}</b><small>{nombresRol[user.rol]}</small></div><button aria-label="Cerrar sesión" onClick={logout}>Salir</button></div></aside>;
+}

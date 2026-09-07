@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
-import { registrarAuditoria } from "../../../../lib/auditoria";
+import { registrarAdvertenciaSegregacionConciliacion, registrarAuditoria } from "../../../../lib/auditoria";
 import { movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
 
@@ -141,6 +141,13 @@ async function revisar(
     return jsonError(`No se puede aprobar: quedan ${actual.lineasPendientes} líneas bancarias sin conciliar ni descartar`, 400);
   }
 
+  const [lineaGestionadaPorRevisor] = accion === "aprobar"
+    ? await db.select({ id: lineasReporteBancario.id }).from(lineasReporteBancario)
+      .where(and(eq(lineasReporteBancario.reporteId, conciliacion.reporteId), eq(lineasReporteBancario.conciliadoPor, user.id))).limit(1)
+    : [];
+  const creoConciliacion = conciliacion.creadoPor === user.id;
+  const modificoLineas = Boolean(lineaGestionadaPorRevisor);
+
   const [revisada] = await db.update(conciliacionesBancarias).set({
     estado: accion === "aprobar" ? "aprobada" : "rechazada",
     observaciones,
@@ -157,6 +164,16 @@ async function revisar(
     entidadId: conciliacion.id,
     detalle: `Período ${conciliacion.periodo} · cuenta ${conciliacion.cuentaBancariaNumero}${observaciones ? ` · ${observaciones}` : ""}`,
   });
+
+  if (accion === "aprobar" && (creoConciliacion || modificoLineas)) {
+    await registrarAdvertenciaSegregacionConciliacion(db, {
+      user,
+      conciliacionId: conciliacion.id,
+      periodo: conciliacion.periodo,
+      cuentaBancariaNumero: conciliacion.cuentaBancariaNumero,
+      origen: creoConciliacion && modificoLineas ? "creacion_y_lineas" : creoConciliacion ? "creacion" : "lineas",
+    });
+  }
 
   return Response.json({ conciliacion: revisada }, { headers: { "Cache-Control": "no-store" } });
 }

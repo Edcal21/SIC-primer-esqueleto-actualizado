@@ -29,3 +29,24 @@ export async function registrarAuditoria(db: AuditDb, input: AuditoriaInput) {
     console.warn("No se pudo registrar auditoría", error);
   }
 }
+
+export async function registrarAdvertenciaSegregacionConciliacion(
+  db: AuditDb,
+  input: { user: UsuarioSesion; conciliacionId: string; periodo: string; cuentaBancariaNumero: string; origen: "creacion" | "lineas" | "creacion_y_lineas" },
+) {
+  const origen = input.origen === "creacion_y_lineas"
+    ? "generó la conciliación y modificó sus líneas"
+    : input.origen === "creacion"
+      ? "generó la conciliación"
+      : "modificó líneas de la conciliación";
+
+  await registrarAuditoria(db, {
+    user: input.user,
+    modulo: "Conciliación",
+    accion: "Advertencia SoD: mismo usuario concilió y aprobó",
+    entidad: "conciliaciones_bancarias",
+    entidadId: input.conciliacionId,
+    resultado: "correcto",
+    detalle: `Excepción de segregación de funciones: el usuario ${origen} y posteriormente la aprobó · período ${input.periodo} · cuenta ${input.cuentaBancariaNumero}`,
+  });
+}

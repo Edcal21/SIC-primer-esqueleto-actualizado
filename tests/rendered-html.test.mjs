@@ -35,17 +35,20 @@ test("server-renders the SIC login shell", async () => {
 });
 
 test("keeps sample data out of SIC runtime files", async () => {
-  const [page, reportes, auth, readme] = await Promise.all([
+  const [page, login, shared, reportes, auth, readme] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/Login.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/shared.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/reportes.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../README.md", import.meta.url), "utf8"),
   ]);
 
-  assert.doesNotMatch(page, /Datos demostrativos|datos de muestra|2026-06|2025-06|2025-12/);
-  assert.match(page, /Iniciar sesión/);
-  assert.match(page, /ACCESO SEGURO/);
-  assert.match(page, /Universal Nicaragua/);
+  const frontendShell = `${page}\n${login}\n${shared}`;
+  assert.doesNotMatch(frontendShell, /Datos demostrativos|datos de muestra|2026-06|2025-06|2025-12/);
+  assert.match(login, /Iniciar sesión/);
+  assert.match(login, /ACCESO SEGURO/);
+  assert.match(shared, /Universal Nicaragua/);
   assert.doesNotMatch(reportes, /saldo2025|saldo2026|Datos demostrativos|Ofrendas recibidas|BAC Credomatic/);
   assert.doesNotMatch(auth, /Falling back to local development/);
   assert.match(auth, /SIC_ALLOW_LOCAL_AUTH_FALLBACK/);
@@ -53,20 +56,51 @@ test("keeps sample data out of SIC runtime files", async () => {
 });
 
 test("every navigable module has a real screen wired in the shell", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const menu = page.slice(page.indexOf("const menu = ["), page.indexOf("const menuGroups"));
+  const [page, shared] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/shared.ts", import.meta.url), "utf8"),
+  ]);
+  const menu = shared.slice(shared.indexOf("export const menu = ["), shared.indexOf("export const menuGroups"));
   const nombres = [...menu.matchAll(/nombre: "([^"]+)"/g)].map(match => match[1]);
 
   assert.ok(nombres.length >= 8, "el menú debe exponer los módulos del sistema");
   for (const nombre of nombres) {
-    assert.match(page, new RegExp(`active === "${nombre}" \\?`), `El módulo "${nombre}" no tiene pantalla conectada y caería en el placeholder`);
+    assert.match(page, new RegExp(`case "${nombre}"`), `El módulo "${nombre}" no tiene pantalla conectada y caería en el placeholder`);
   }
+
+  const lazyModules = [
+    "Resumen",
+    "UsuariosAdmin",
+    "Movimiento",
+    "Minutas",
+    "CatalogoContable",
+    "IglesiasAdmin",
+    "Bancos",
+    "ConciliacionBancaria",
+    "Importaciones",
+    "Reportes",
+    "Auditoria",
+    "ConfiguracionInstitucional",
+    "ModuleFallback",
+  ];
+
+  assert.ok(page.split("\n").length < 200, "page.tsx debe limitarse al shell y enrutamiento de la interfaz");
+  for (const moduleName of lazyModules) {
+    assert.match(page, new RegExp(`lazy\\(\\(\\) => import\\("\\.\\/modules\\/${moduleName}"\\)\\)`), `${moduleName} debe cargarse con división de código`);
+    const moduleSource = await readFile(new URL(`../app/modules/${moduleName}.tsx`, import.meta.url), "utf8");
+    assert.match(moduleSource, /export default function /, `${moduleName} debe ser un módulo independiente`);
+  }
+
+  const movimiento = await readFile(new URL("../app/modules/Movimiento.tsx", import.meta.url), "utf8");
+  assert.match(movimiento, /import \{[^}]*useRef[^}]*\} from "react"/, "Movimiento debe importar cada hook de React que utiliza");
 });
 
 test("bank statements and reconciliation persist to PostgreSQL", async () => {
-  const [carga, conciliacion, configuracion] = await Promise.all([
+  const [carga, conciliacion, conciliacionUi, auditoria, configuracion] = await Promise.all([
     readFile(new URL("../app/api/banco/reportes/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/conciliaciones/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/ConciliacionBancaria.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/auditoria.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/configuracion/route.ts", import.meta.url), "utf8"),
   ]);
 
@@ -75,6 +109,10 @@ test("bank statements and reconciliation persist to PostgreSQL", async () => {
   assert.match(carga, /puede\(user, "banco:cargar"\)/);
   assert.match(conciliacion, /puede\(user, "conciliacion:aprobar"\)/, "aprobar conciliaciones exige el permiso correspondiente");
   assert.match(conciliacion, /registrarAuditoria/, "las acciones de conciliación deben auditarse");
+  assert.match(conciliacionUi, /canReconcile && canApprove/, "la interfaz debe advertir cuando un usuario concentra conciliación y aprobación");
+  assert.match(conciliacionUi, /Advertencia: Usted tiene permisos de conciliación Y aprobación/);
+  assert.match(conciliacion, /registrarAdvertenciaSegregacionConciliacion/, "una aprobación sin segregación debe generar una alerta de auditoría");
+  assert.match(auditoria, /mismo usuario concilió y aprobó/);
   assert.match(configuracion, /puede\(user, "configuracion:administrar"\)/);
 });
 
@@ -110,8 +148,9 @@ test("sensitive uploads are rate limited", async () => {
 });
 
 test("church catalog is administrable from API and UI", async () => {
-  const [page, auth, iglesias, iglesiaPatch, migration] = await Promise.all([
+  const [page, iglesiasUi, auth, iglesias, iglesiaPatch, migration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/IglesiasAdmin.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/iglesias/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/iglesias/[codigo]/route.ts", import.meta.url), "utf8"),
@@ -120,8 +159,9 @@ test("church catalog is administrable from API and UI", async () => {
 
   assert.match(auth, /iglesias:administrar/, "debe existir un permiso explícito para administrar iglesias");
   assert.match(migration, /iglesias:administrar/, "la migración debe sembrar el permiso de iglesias");
-  assert.match(page, /IglesiasAdmin/, "la UI debe exponer una pantalla de administración de iglesias");
-  assert.match(page, /active === "Iglesias"/, "el módulo Iglesias debe estar conectado al switch principal");
+  assert.match(page, /lazy\(\(\) => import\("\.\/modules\/IglesiasAdmin"\)\)/, "la UI debe cargar la administración de iglesias como módulo independiente");
+  assert.match(page, /case "Iglesias"/, "el módulo Iglesias debe estar conectado al switch principal");
+  assert.match(iglesiasUi, /export default function IglesiasAdmin/);
   assert.match(iglesias, /export async function POST/, "la API debe permitir crear iglesias");
   assert.match(iglesiaPatch, /export async function PATCH/, "la API debe permitir actualizar iglesias");
 });
@@ -148,4 +188,22 @@ test("database protects accounting entries with double-entry and duplicate const
   assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS ux_movimientos_unico/, "la migración debe crear el índice único parcial");
   assert.match(movimientos, /23505/, "la API debe traducir duplicados de BD a una respuesta clara");
   assert.match(movimientos, /23514/, "la API debe traducir violaciones contables de BD a una respuesta clara");
+});
+
+test("trial balance parser ignores report totals and preserves Excel row numbers", async () => {
+  const parserUrl = new URL(`../lib/balanza.ts?test=${process.pid}-${Date.now()}`, import.meta.url);
+  const { extraerFilasBalanza } = await import(parserUrl.href);
+  const result = extraerFilasBalanza([
+    ["Balance de Comprobación"],
+    ["Cuenta", "Descripción", "Saldo Inicial", "Débitos", "Créditos", "Saldo Final"],
+    ["11010203", "Banco LA FISE", 100, 25, 10, 115],
+    ["Sumas Iguales :", "", "", 25, 25, ""],
+    ["Powered By Controles y Sistemas S.A."],
+  ]);
+
+  assert.equal(result.filas.length, 1);
+  assert.equal(result.filas[0].numeroLinea, 3);
+  assert.equal(result.filas[0].cuentaCodigo, "11010203");
+  assert.equal(result.totalDebe, 25);
+  assert.equal(result.totalHaber, 25);
 });
