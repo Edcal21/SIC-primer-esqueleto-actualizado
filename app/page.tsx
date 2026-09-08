@@ -25,6 +25,15 @@ function ModuleLoading() {
   return <div className="reportLoadingOverlay moduleLoading" role="status" aria-live="polite"><span className="spinner" aria-hidden="true"/><span className="loadingText">CARGANDO MÓDULO</span></div>;
 }
 
+const moduleSlug = (name: string) => name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const moduleFromHash = (allowedNames: string[]) => {
+  if (typeof window === "undefined") return null;
+  const currentSlug = window.location.hash.replace(/^#/, "");
+  return allowedNames.find(name => moduleSlug(name) === currentSlug) ?? null;
+};
+const allowedNamesForUser = (currentUser: User) => menu.filter(item => currentUser.permisos.includes(item.permiso)).map(item => item.nombre);
+const defaultModuleForUser = (currentUser: User) => currentUser.rol === "administrador" ? "Usuarios" : currentUser.rol === "operador_bancario" ? "Bancos" : currentUser.rol === "auditor_general" ? "Auditoría" : "Resumen";
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
@@ -36,11 +45,15 @@ export default function Home() {
   const [modalBusy, setModalBusy] = useState(false);
   const noticeTimer = useRef<number | null>(null);
 
-  useEffect(() => { fetch("/api/auth/me").then(async response => { if (response.ok) setUser((await response.json()).user); }).finally(() => setChecking(false)); }, []);
+  const can = (permission: Permiso) => Boolean(user?.permisos.includes(permission));
+  const setActiveModule = (value: string) => {
+    setActive(value);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", `#${moduleSlug(value)}`);
+  };
+
+  useEffect(() => { fetch("/api/auth/me").then(async response => { if (response.ok) { const currentUser = (await response.json()).user as User; setUser(currentUser); setActive(moduleFromHash(allowedNamesForUser(currentUser)) ?? defaultModuleForUser(currentUser)); } }).finally(() => setChecking(false)); }, []);
   useEffect(() => { fetch("/api/configuracion").then(async response => { if (response.ok) setConfig((await response.json()).configuracion ?? defaultConfig); }).catch(() => setConfig(defaultConfig)); }, []);
   useEffect(() => () => { if (noticeTimer.current) window.clearTimeout(noticeTimer.current); }, []);
-
-  const can = (permission: Permiso) => Boolean(user?.permisos.includes(permission));
   const notify = (message: string) => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     setNotice(message);
@@ -54,10 +67,11 @@ export default function Home() {
     const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ usuario: form.get("usuario"), password: form.get("password") }) });
     const result = await response.json();
     if (!response.ok) return setError(result.error);
-    setUser(result.user); setActive(result.user.rol === "administrador" ? "Usuarios" : result.user.rol === "operador_bancario" ? "Bancos" : result.user.rol === "auditor_general" ? "Auditoría" : "Resumen");
+    setUser(result.user);
+    setActiveModule(moduleFromHash(allowedNamesForUser(result.user)) ?? defaultModuleForUser(result.user));
   }
 
-  async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setUser(null); setActive("Resumen"); }
+  async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setUser(null); setActiveModule("Resumen"); }
   async function confirmModal() {
     if (!modal || modalBusy) return;
     setModalBusy(true);
@@ -71,7 +85,7 @@ export default function Home() {
 
   function renderModule(currentUser: User) {
     switch (active) {
-      case "Resumen": return <Resumen user={currentUser} setActive={setActive}/>;
+      case "Resumen": return <Resumen user={currentUser} setActive={setActiveModule}/>;
       case "Usuarios": return <UsuariosAdmin notify={notify}/>;
       case "Registrar movimiento": return <Movimiento notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Minutas": return <Minutas notify={notify}/>;
@@ -93,8 +107,8 @@ export default function Home() {
   const allowedMenu = menu.filter(item => can(item.permiso));
 
   return <main className="shell">
-    <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActive} logout={() => requestConfirmation({ title: "Cerrar sesión segura", message: "Se cerrará la sesión actual y deberá autenticarse nuevamente para continuar.", confirmLabel: "Cerrar sesión", onConfirm: logout })} config={config}/>
-    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={() => setActive("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content"><Suspense key={active} fallback={<ModuleLoading/>}>{renderModule(user)}</Suspense></div></section>
+    <Sidebar user={user} active={active} allowedMenu={allowedMenu} setActive={setActiveModule} logout={() => requestConfirmation({ title: "Cerrar sesión segura", message: "Se cerrará la sesión actual y deberá autenticarse nuevamente para continuar.", confirmLabel: "Cerrar sesión", onConfirm: logout })} config={config}/>
+    <section className="workspace"><header className="topbar"><div><p>{config.sistemaDescripcion}</p><span>Sesión protegida · {nombresRol[user.rol]} · {config.institucionNombre}</span></div>{can("movimientos:escribir") ? <button className="primary" onClick={() => setActiveModule("Registrar movimiento")}>Nuevo movimiento</button> : null}</header><div className="content"><Suspense key={active} fallback={<ModuleLoading/>}>{renderModule(user)}</Suspense></div></section>
     {notice ? <div className="toast" role="status" aria-live="polite"><span className="toastIcon" aria-hidden="true">✓</span><span>{notice}</span></div> : null}
     {modal ? <ConfirmModal modal={modal} busy={modalBusy} onCancel={() => { if (!modalBusy) setModal(null); }} onConfirm={confirmModal}/> : null}
   </main>;

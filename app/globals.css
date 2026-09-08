@@ -131,6 +131,42 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;back
 @media(max-width:1100px){.bankUploadPanel{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){.bankUploadPanel{grid-template-columns:1fr}.bankUploadPanel .uploadField{width:100%}.matchCell{min-width:0}}
 
+/* Accesibilidad y microinteracciones operativas */
+:where(button,a,input,select,textarea,[tabindex]:not([tabindex="-1"])):focus-visible{
+  outline:2px solid var(--blue);
+  outline-offset:2px;
+  box-shadow:0 0 0 4px rgba(37,99,168,.16);
+}
+button,.primary,.secondary,.navItem,.statusList button,.shortcutGrid button,.reportCatalog button,.classList button,.fileDrop,.linkButton{
+  transition:background-color 140ms ease,border-color 140ms ease,color 140ms ease,box-shadow 140ms ease,transform 140ms ease;
+}
+button:active:not(:disabled),.fileDrop:active{transform:translateY(1px)}
+.panel,.metric,.readOnlyBanner,.segregationWarning,.ruleCallout{transition:border-color 160ms ease,box-shadow 160ms ease,background-color 160ms ease}
+.content{animation:moduleFadeIn 160ms ease-out}
+@keyframes moduleFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.detailRow{animation:detailRowIn 140ms ease-out;transition:background-color 140ms ease,border-color 140ms ease}
+@keyframes detailRowIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.balanceSummary{transition:background-color 150ms ease,border-color 150ms ease,box-shadow 150ms ease}
+.balanceSummary.balanced{box-shadow:0 0 0 3px rgba(23,138,84,.08)}
+.balanceSummary.pending{box-shadow:0 0 0 3px rgba(183,121,31,.08)}
+.tableWrap table th:first-child,
+.tableWrap table td:first-child{
+  position:sticky;
+  left:0;
+  z-index:2;
+  background:inherit;
+  box-shadow:1px 0 0 var(--line),8px 0 14px rgba(15,23,42,.05);
+}
+.tableWrap table th:first-child{z-index:3;background:#f4f7fa}
+.tableWrap table tbody tr:nth-child(even) td:first-child{background:#fbfcfe}
+.tableWrap table tbody tr:hover td:first-child{background:#f2f7fc}
+.tableWrap table tbody tr:not(:hover):nth-child(odd) td:first-child{background:#fff}
+small,.pill,.status,.navLabel,.permissionGrid small,.periodControl>span,.reportCatalog small,.financialTable td:first-child small{
+  font-size:max(11px,.78rem);
+}
+.loadingText{font-family:var(--font-geist-sans),Arial,Helvetica,sans-serif}
+body{font-family:var(--font-geist-sans),Arial,Helvetica,sans-serif}
+
 @media print{
   @page{size:A4;margin:12mm}
   .sidebar,.topbar,.timelineSlicer,.reportCatalog,.secondary,.toast,.authScreen,.modalOverlay{display:none!important}
@@ -148,4 +184,13 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;back
   td{color:#000!important;border-bottom:1px solid #ccc!important}
   .totalRow td{background:#f0f0f0!important;font-weight:bold!important;border-top:2px solid #000!important}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+}
+
+@media(prefers-reduced-motion:reduce){
+  *,::before,::after{
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    scroll-behavior:auto!important;
+    transition-duration:.01ms!important;
+  }
 }

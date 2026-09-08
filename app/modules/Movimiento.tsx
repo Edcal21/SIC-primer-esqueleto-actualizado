@@ -96,6 +96,30 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
     setError("");
   }
 
+  function formularioTieneDatos() {
+    const form = formRef.current ? new FormData(formRef.current) : null;
+    const tieneEncabezado = Boolean(
+      form && (
+        String(form.get("iglesiaCodigo") ?? "") ||
+        String(form.get("referencia") ?? "").trim() ||
+        String(form.get("concepto") ?? "").trim()
+      )
+    );
+    const tieneDetalles = detalles.some(detalle => detalle.cuentaCodigo.trim() || detalle.monto.trim() || String(detalle.montoOriginal ?? "").trim());
+    return tieneEncabezado || Boolean(cuentaBancariaNumero) || tieneDetalles;
+  }
+
+  function confirmarLimpieza() {
+    if (!formularioTieneDatos()) return limpiarFormulario();
+    requestConfirmation({
+      title: "Limpiar formulario",
+      message: "Se borrarán los datos capturados de esta minuta. Esta acción solo limpia la pantalla; no modifica registros guardados.",
+      confirmLabel: "Limpiar",
+      isDanger: true,
+      onConfirm: limpiarFormulario,
+    });
+  }
+
   async function guardar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -235,7 +259,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
       <div className="movementFoot">
         {cuentas.length ? <div className="accountHint"><MenuIcon name="info" className="glyphIcon"/><span>{cuentas.length} cuentas de movimiento, {iglesias.length} iglesias y {cuentasBancarias.length} cuentas bancarias disponibles desde PostgreSQL.</span></div> : <span/>}
         <div className="formActions">
-          <button className="secondary" type="button" onClick={limpiarFormulario} disabled={saving}>Limpiar formulario</button>
+          <button className="secondary" type="button" onClick={confirmarLimpieza} disabled={saving}>Limpiar formulario</button>
           <button className="primary" type="submit" disabled={saving || loading || codigosInvalidos || !hayLineaBanco || tasaFaltante || periodoBloqueado || !cuentas.length || !iglesias.length || !cuentasBancarias.length || !isBalanced}>{saving?"Guardando…":"Guardar movimiento"}</button>
         </div>
       </div>
