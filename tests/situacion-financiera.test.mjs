@@ -56,7 +56,7 @@ test("el flujo aplica el mapeo oficial y conserva en cero las actividades sin fu
   const reporte = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "mayo de 2026");
   const valores = new Map(reporte.filas.map(item => [item.concepto, item.actual]));
   assert.equal(reporte.fuente, "Estado de Situación Financiera 2026-06");
-  assert.equal(valores.get("Utilidad o pérdida del período"), -800);
+  assert.equal(valores.get("Utilidad o pérdida del período"), 0);
   assert.equal(valores.get("Depreciación"), -70);
   assert.equal(valores.get("Impuestos pagados por adelantado"), 30);
   assert.equal(valores.get("Acreedores Comerciales"), 40);
@@ -66,11 +66,11 @@ test("el flujo aplica el mapeo oficial y conserva en cero las actividades sin fu
   assert.equal(valores.get("Mobiliario y Equipo de Oficina"), 10);
   assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), 0);
   assert.equal(valores.get("Cuentas por cobrar a empleados"), 0);
-  assert.equal(valores.get("Efectivo neto utilizado en las actividades de operación"), -790);
+  assert.equal(valores.get("Efectivo neto utilizado en las actividades de operación"), 10);
   assert.equal(valores.get("Efectivo neto utilizado en las actividades de inversión"), 60);
-  assert.equal(valores.get("Aumento (Disminución) neto en el efectivo"), 730);
+  assert.equal(valores.get("Aumento (Disminución) neto en el efectivo"), -70);
   assert.equal(valores.get("Efectivo al 31 de Mayo 2026"), 800);
-  assert.equal(valores.get("Efectivo al 30 de Junio 2026"), 1530);
+  assert.equal(valores.get("Efectivo al 30 de Junio 2026"), 730);
 });
 
 test("al cambiar de año traslada los excedentes del período comparativo con signo inverso", async () => {
@@ -79,7 +79,7 @@ test("al cambiar de año traslada los excedentes del período comparativo con si
   const anterior = { periodo: "2025-12", filas: [fila("Excedente Ingresos s/Egresos acumulados", 1000), fila("Excedente Ingresos s/Egresos del ejercicio", 250), fila("Total ACTIVOS CORRIENTES", 5000)] };
   const reporte = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "diciembre de 2025");
   const valores = new Map(reporte.filas.map(item => [item.concepto, item.actual]));
-  assert.equal(valores.get("Utilidad o pérdida del período"), 50);
+  assert.equal(valores.get("Utilidad o pérdida del período"), -1200);
   assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), -1250);
   assert.equal(valores.get("Efectivo al 31 de Diciembre 2025"), 5000);
 });
@@ -105,7 +105,7 @@ test("la vista comparativa conserva todas las líneas de ambos estados y calcula
   assert.equal(reporte.filas[1].esTotal, true);
 });
 
-test("los dos excedentes aparecen en la comparación y su suma alimenta la utilidad del flujo", async () => {
+test("los dos excedentes aparecen en la comparación y la variación de sus sumas alimenta la utilidad del flujo", async () => {
   const { reporteFlujoDesdeSituaciones, reporteSituacionComparativaDesdeSituaciones } = await import(`../lib/reportes.ts?excedentes=${Date.now()}`);
   const actual = { periodo: "2026-06", filas: [
     fila("Excedente Ingresos s/Egresos acumulados", -1200),
@@ -126,7 +126,7 @@ test("los dos excedentes aparecen en la comparación y su suma alimenta la utili
   });
 
   const flujo = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "mayo de 2026");
-  assert.equal(flujo.filas.find(item => item.concepto === "Utilidad o pérdida del período")?.actual, -850);
+  assert.equal(flujo.filas.find(item => item.concepto === "Utilidad o pérdida del período")?.actual, -50);
 });
 
 test("la exportación Excel conserva la plantilla, las fórmulas y los recursos gráficos", async () => {

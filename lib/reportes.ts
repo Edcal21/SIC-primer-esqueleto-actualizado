@@ -77,6 +77,10 @@ const saldoPorConcepto = (periodo: SituacionPeriodo | null, ...conceptos: string
 const variacionSaldo = (actual: SituacionPeriodo, anterior: SituacionPeriodo | null, ...conceptos: string[]) =>
   saldoPorConcepto(actual, ...conceptos) - saldoPorConcepto(anterior, ...conceptos);
 const sumar = (valores: number[]) => valores.reduce((total, valor) => total + valor, 0);
+const totalExcedentes = (periodo: SituacionPeriodo | null) => sumar([
+  saldoPorConcepto(periodo, "Excedente Ingresos s/Egresos acumulados"),
+  saldoPorConcepto(periodo, "Excedente Ingresos s/Egresos del ejercicio"),
+]);
 const etiquetaFinPeriodo = (periodo: string) => {
   const [year, month] = periodo.split("-").map(Number);
   const fecha = new Date(Date.UTC(year, month, 0));
@@ -86,10 +90,7 @@ const etiquetaFinPeriodo = (periodo: string) => {
 
 /** Construye las líneas del formato oficial a partir de las variaciones de Saldo Final. */
 export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
-  const utilidad = sumar([
-    saldoPorConcepto(actual, "Excedente Ingresos s/Egresos acumulados"),
-    saldoPorConcepto(actual, "Excedente Ingresos s/Egresos del ejercicio"),
-  ]);
+  const utilidad = totalExcedentes(actual) - totalExcedentes(anterior);
   const depreciacion = sumar([
     variacionSaldo(actual, anterior, "DEPRECIACION DE VEHICULOS"),
     variacionSaldo(actual, anterior, "DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS"),
@@ -108,10 +109,7 @@ export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior:
     0, 0,
   ];
   const cambioDeAnio = Boolean(anterior && actual.periodo.slice(0, 4) !== anterior.periodo.slice(0, 4));
-  const excedenteAcumulado = cambioDeAnio ? -sumar([
-    saldoPorConcepto(anterior, "Excedente Ingresos s/Egresos acumulados"),
-    saldoPorConcepto(anterior, "Excedente Ingresos s/Egresos del ejercicio"),
-  ]) : 0;
+  const excedenteAcumulado = cambioDeAnio ? -totalExcedentes(anterior) : 0;
   const inversion = [
     variacionSaldo(actual, anterior, "EDIFICIOS"),
     variacionSaldo(actual, anterior, "MOBILIARIO Y EQUIPOS", "MOBILIARIO Y EQUIPO DE OFICINA"),
