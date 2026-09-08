@@ -86,13 +86,16 @@ export type ImpedimentoCierre = { motivo: string; detalle: string };
  * usuario no descubra los problemas de a uno.
  */
 export async function impedimentosParaCerrar(db: Db, periodo: string): Promise<ImpedimentoCierre[]> {
-  const [conciliaciones, balanzas] = await Promise.all([
+  const [conciliaciones, balanzas, estadosFinancieros] = await Promise.all([
     db.select({ id: conciliacionesBancarias.id, estado: conciliacionesBancarias.estado, cuenta: conciliacionesBancarias.cuentaBancariaNumero })
       .from(conciliacionesBancarias)
       .where(and(eq(conciliacionesBancarias.periodo, periodo), ne(conciliacionesBancarias.estado, "aprobada"))),
     db.select({ id: importacionesBalanza.id, archivo: importacionesBalanza.archivoNombre })
       .from(importacionesBalanza)
       .where(and(eq(importacionesBalanza.periodo, periodo), eq(importacionesBalanza.estado, "con_diferencias"))),
+    db.select({ id: importacionesSituacionFinanciera.id, archivo: importacionesSituacionFinanciera.archivoNombre, observaciones: importacionesSituacionFinanciera.observaciones })
+      .from(importacionesSituacionFinanciera)
+      .where(and(eq(importacionesSituacionFinanciera.periodo, periodo), eq(importacionesSituacionFinanciera.estado, "con_diferencias"))),
   ]);
 
   const impedimentos: ImpedimentoCierre[] = [];
@@ -109,6 +112,12 @@ export async function impedimentosParaCerrar(db: Db, periodo: string): Promise<I
     impedimentos.push({
       motivo: "Conciliaciones bancarias rechazadas",
       detalle: `${rechazadas.length} conciliación(es) rechazada(s): ${rechazadas.map(fila => fila.cuenta).join(", ")}. Corrija y vuelva a conciliar antes de cerrar.`,
+    });
+  }
+  if (estadosFinancieros.length) {
+    impedimentos.push({
+      motivo: "Estado de Situación Financiera con diferencias",
+      detalle: `${estadosFinancieros.length} importación(es) marcada(s): ${estadosFinancieros.map(fila => fila.archivo).join(", ")}. ${estadosFinancieros[0].observaciones ?? ""} Corrija el archivo y vuelva a importarlo antes de cerrar.`.replace(/\s+/g, " ").trim(),
     });
   }
   if (balanzas.length) {

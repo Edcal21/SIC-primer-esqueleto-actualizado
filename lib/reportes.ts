@@ -5,7 +5,7 @@ import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, 
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; esTotal?: boolean; esEncabezado?: boolean };
-export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string };
+export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string; advertencias?: string[] };
 type Db = ReturnType<typeof getDb>;
 type BalanzaPeriodo = { periodo: string; filas: { codigo: string; concepto: string; debe: number; haber: number; saldo: number }[] };
 type SituacionPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
@@ -104,20 +104,32 @@ export const etiquetaFinPeriodo = (periodo: string) => {
  * funciona igual comparando meses o años y no necesita un caso especial para el cambio de año.
  */
 export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+  // Un concepto que no está en ninguno de los dos estados devuelve cero y se vuelve invisible. Se
+  // registra para advertirlo: puede ser una cuenta renombrada en el origen, y un cero silencioso en
+  // un flujo de efectivo es indistinguible de una cuenta que no se movió.
+  const ausentes: string[] = [];
+  const presente = (conceptos: string[]) => {
+    const claves = conceptos.map(claveConcepto);
+    return [actual, anterior].some(estado => estado?.filas.some(fila => claves.includes(claveConcepto(fila.concepto))));
+  };
+  const registrar = <T>(conceptos: string[], valor: T) => {
+    if (!presente(conceptos)) ausentes.push(conceptos[0]);
+    return valor;
+  };
   /** Variación de una cuenta de activo: aumentar el activo consume efectivo. */
-  const usoPorActivo = (...conceptos: string[]) => dosDecimales(-variacionSaldo(actual, anterior, ...conceptos));
+  const usoPorActivo = (...conceptos: string[]) => registrar(conceptos, dosDecimales(-variacionSaldo(actual, anterior, ...conceptos)));
   /** Variación de una cuenta de pasivo o patrimonio: aumentarla libera efectivo. */
-  const origenPorPasivo = (...conceptos: string[]) => dosDecimales(variacionSaldo(actual, anterior, ...conceptos));
+  const origenPorPasivo = (...conceptos: string[]) => registrar(conceptos, dosDecimales(variacionSaldo(actual, anterior, ...conceptos)));
 
   const resultadoPeriodo = dosDecimales(sumar([
-    variacionSaldo(actual, anterior, "Excedente Ingresos s/Egresos acumulados"),
-    variacionSaldo(actual, anterior, "Excedente Ingresos s/Egresos del ejercicio"),
+    registrar(["Excedente Ingresos s/Egresos acumulados"], variacionSaldo(actual, anterior, "Excedente Ingresos s/Egresos acumulados")),
+    registrar(["Excedente Ingresos s/Egresos del ejercicio"], variacionSaldo(actual, anterior, "Excedente Ingresos s/Egresos del ejercicio")),
   ]));
   // Las cuentas de depreciación son negativas y se vuelven más negativas: invertir su variación
   // devuelve el gasto del período, que se suma porque nunca salió de caja.
   const depreciacion = dosDecimales(-sumar([
-    variacionSaldo(actual, anterior, "DEPRECIACION DE VEHICULOS"),
-    variacionSaldo(actual, anterior, "DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS"),
+    registrar(["DEPRECIACION DE VEHICULOS"], variacionSaldo(actual, anterior, "DEPRECIACION DE VEHICULOS")),
+    registrar(["DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS"], variacionSaldo(actual, anterior, "DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS")),
   ]));
 
   const operacion = [
@@ -149,11 +161,15 @@ export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior:
   const aumentoNeto = dosDecimales(totalOperacion + totalInversion + aportesPatrimonio);
   // "Total EFECTIVO" es el saldo de caja y bancos. Se cae a activos corrientes solo si el estado no
   // trae esa línea: no son equivalentes en cuanto exista una cuenta por cobrar corriente.
+  registrar(["Total EFECTIVO"], null);
   const efectivoInicial = saldoPorConcepto(anterior, "Total EFECTIVO", "Total ACTIVOS CORRIENTES");
   const efectivoFinal = dosDecimales(efectivoInicial + aumentoNeto);
   const efectivoDeclarado = saldoPorConcepto(actual, "Total EFECTIVO", "Total ACTIVOS CORRIENTES");
   const descuadre = dosDecimales(efectivoFinal - efectivoDeclarado);
 
+  // Las posiciones que el formato oficial contempla pero el estado de origen no alimenta. Se listan
+  // como advertencia informativa para que nadie las lea como "no hubo movimiento".
+  const sinFuente = ["Cuentas por cobrar a empleados", "Anticipos a justificar", "Cuentas por cobrar por servicios", "Deudores comerciales y otras cuentas por Cobrar", "Pagos anticipados", "Depósito en garantía", "Póliza de seguros", "Certificados a plazo fijo (fondos restringidos)", "Retenciones por pagar", "Cuentas transitorias", "Depósito sin identificar"];
   const nombresOperacion = ["Utilidad o pérdida del período", "Depreciación", "Cuentas por cobrar a empleados", "Anticipos a justificar", "Cuentas por cobrar por servicios", "Deudores comerciales y otras cuentas por Cobrar", "Impuestos pagados por adelantado", "Pagos anticipados", "Depósito en garantía", "Póliza de seguros", "Acreedores Comerciales", "Certificados a plazo fijo (fondos restringidos)", "Impuestos por pagar", "Retenciones por pagar", "Gastos acumulados por pagar", "Cuentas transitorias", "Depósito sin identificar"];
   const nombresInversion = ["Edificios", "Mobiliario y Equipo de Oficina", "Vehículos", "Terrenos", "Incremento o Decremento", "Excedente Ingresos/Egresos Acumulados"];
   const filas: FilaReporte[] = [
@@ -181,6 +197,17 @@ export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior:
     periodoFuente: actual.periodo, periodoComparativoFuente: anterior?.periodo,
     moneda: "NIO", fuente: `Estado de Situación Financiera ${actual.periodo}`,
     columnas: ["Concepto", `${etiqueta} vs ${etiquetaComparativa}`], filas, generadoEn: new Date().toISOString(),
+    advertencias: [
+      ...(ausentes.length
+        ? [`No se encontraron en ninguno de los dos estados: ${[...new Set(ausentes)].join(", ")}. Esas líneas salen en cero; verifique si la cuenta cambió de nombre en el archivo de origen.`]
+        : []),
+      ...(Math.abs(descuadre) >= 0.01
+        ? [`El flujo no reconstruye el efectivo declarado: diferencia de ${descuadre.toFixed(2)}. Revise que ambos estados correspondan a períodos consecutivos y que el archivo cuadre.`]
+        : []),
+      ...(sinFuente.length
+        ? [`Líneas del formato oficial que el sistema no alimenta desde el Estado de Situación Financiera y quedan en cero: ${sinFuente.join(", ")}.`]
+        : []),
+    ],
   };
 }
 

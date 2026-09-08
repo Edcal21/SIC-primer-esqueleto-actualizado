@@ -176,6 +176,13 @@
       "when": 1788800000000,
       "tag": "0024_minuta_unica_nulos",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788810000000,
+      "tag": "0025_situacion_con_diferencias",
+      "breakpoints": true
     }
   ]
 }

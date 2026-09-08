@@ -212,13 +212,16 @@ export const importacionesSituacionFinanciera = pgTable("importaciones_situacion
   archivoNombre: text("archivo_nombre").notNull(),
   archivoTamano: integer("archivo_tamano").notNull(),
   periodo: varchar("periodo", { length: 7 }).notNull(),
-  estado: varchar("estado", { length: 10, enum: ["procesado", "error"] }).notNull().default("procesado"),
+  estado: varchar("estado", { length: 15, enum: ["procesado", "con_diferencias", "error"] }).notNull().default("procesado"),
+  /** Qué encontró la revisión de cuadre y de conceptos repetidos al importar. */
+  observaciones: text("observaciones"),
   totalLineas: integer("total_lineas").notNull().default(0),
   importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("idx_importaciones_situacion_periodo").on(table.periodo),
   index("idx_importaciones_situacion_usuario").on(table.importadoPor),
+  check("ck_importaciones_situacion_estado", sql`${table.estado} in ('procesado', 'con_diferencias', 'error')`),
   check("ck_importaciones_situacion_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
   check("ck_importaciones_situacion_estado", sql`${table.estado} in ('procesado', 'error')`),
   check("ck_importaciones_situacion_lineas", sql`${table.totalLineas} >= 0`),

@@ -194,3 +194,11 @@ body{font-family:var(--font-geist-sans),Arial,Helvetica,sans-serif}
     transition-duration:.01ms!important;
   }
 }
+
+/* Advertencias de un reporte generado: informan sin bloquear la emisión. */
+.reportWarnings{background:#fff8e6;border-left:3px solid #b8860b;border-radius:6px;padding:12px 15px;margin-bottom:14px}
+.reportWarnings b{display:block;font-size:10px;color:#7a5a00;margin-bottom:6px}
+.reportWarnings ul{margin:0;padding-left:16px;display:grid;gap:5px}
+.reportWarnings li{font-size:10px;color:var(--ink);line-height:1.5}
+/* Motivo por el que una importación quedó marcada, bajo su estado en la tabla. */
+.observacionImportacion{display:block;margin-top:5px;font-size:9px;color:var(--muted);line-height:1.45;max-width:34ch}

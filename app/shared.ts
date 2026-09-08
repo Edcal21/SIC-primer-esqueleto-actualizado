@@ -24,7 +24,7 @@ export const formatearMoneda = (valor: number, moneda: "USD" | "NIO") => formato
 export type ReporteDisponible = { id: string; nombre: string; cuentaBancariaNumero: string | null; periodoInicio: string | null; periodoFin: string | null; totalLineas: number };
 export type Evento = { fecha: string; usuario: string; accion: string; resultado: string; detalle?: string | null };
 export type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; totalLineas: number; totalDebe: string; totalHaber: string; creadoEn: string };
-export type ImportacionSituacionFinanciera = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "error"; totalLineas: number; creadoEn: string };
+export type ImportacionSituacionFinanciera = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; observaciones?: string | null; totalLineas: number; creadoEn: string };
 export type PermisoAdmin = { id: Permiso; descripcion: string };
 export type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
@@ -32,7 +32,7 @@ export type Iglesia = { codigo: string; nombre: string; estado?: "activa" | "ina
 export type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO"; estado?: "activa" | "inactiva" };
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
-export type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoFuente?:string; periodoComparativoFuente?:string; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean;esEncabezado?:boolean}[]; generadoEn:string };
+export type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoFuente?:string; periodoComparativoFuente?:string; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean;esEncabezado?:boolean}[]; generadoEn:string; advertencias?:string[] };
 export type CuentaMovimiento = { codigo: string; descripcion: string; naturaleza: "deudora" | "acreedora"; clasificacionFlujo: "operación" | "inversión" | "financiamiento" | "no aplica"; esCuentaMovimiento: boolean; estado: "activa" | "inactiva" };
 export type DetalleMinuta = { tipo: "debito" | "credito"; cuentaCodigo: string; monto: string; afectaCuentaBancaria?: boolean; montoOriginal?: string };
 export type MovimientoRegistrado = { id: string; fecha: string; iglesiaCodigo: string | null; cuentaBancariaNumero: string | null; referencia: string | null; concepto: string; estado: "registrado" | "anulado"; creadoEn: string; enlazadoAConciliacion?: boolean };

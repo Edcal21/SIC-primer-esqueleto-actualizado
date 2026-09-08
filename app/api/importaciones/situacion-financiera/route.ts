@@ -5,7 +5,7 @@ import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { mensajePeriodoCerrado, primerPeriodoCerrado } from "../../../../lib/periodos";
 import { verificarRateLimit } from "../../../../lib/security";
-import { leerSituacionFinanciera } from "../../../../lib/situacion-financiera";
+import { leerSituacionFinanciera, revisarSituacionFinanciera } from "../../../../lib/situacion-financiera";
 
 const periodoRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -44,13 +44,18 @@ export async function POST(request: Request) {
     return jsonError(error instanceof Error ? error.message : "No se pudo leer el Estado de Situación Financiera", 400);
   }
 
+  // La revisión no bloquea la importación: el archivo entra siempre, pero marcado y con el motivo
+  // por escrito. Un estado con diferencias impide después cerrar el período.
+  const revision = revisarSituacionFinanciera(procesado.filas);
+
   try {
     const result = await db.transaction(async tx => {
       const [importacion] = await tx.insert(importacionesSituacionFinanciera).values({
         archivoNombre: archivo.name,
         archivoTamano: archivo.size,
         periodo,
-        estado: "procesado",
+        estado: revision.estado,
+        observaciones: revision.observaciones.length ? revision.observaciones.join(" ") : null,
         totalLineas: procesado.filas.length,
         importadoPor: user.id,
       }).returning();
@@ -63,7 +68,7 @@ export async function POST(request: Request) {
         accion: "Importó estado de situación financiera",
         entidad: "importaciones_situacion_financiera",
         entidadId: importacion.id,
-        detalle: `${archivo.name} · ${periodo} · ${lineas.length} líneas con Saldo Final`,
+        detalle: `${archivo.name} · ${periodo} · ${lineas.length} líneas con Saldo Final · ${revision.estado}${revision.observaciones.length ? ` · ${revision.observaciones.join(" ")}` : ""}`,
       });
       return { importacion, lineas };
     });

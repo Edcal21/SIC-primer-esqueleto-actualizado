@@ -565,6 +565,18 @@ El **flujo de efectivo** se exporta a Excel con el **formato oficial** de la ins
 
 > **El flujo de efectivo se alimenta del Estado de Situación Financiera importado**, comparando el campo *Saldo Final* entre períodos. Si no importó ese estado, el reporte no tiene fuente de datos.
 
+**Advertencias del reporte**
+
+Sobre la tabla puede aparecer un recuadro **«Revise antes de emitir»**. No bloquea la emisión; señala tres cosas:
+
+| Advertencia | Qué significa |
+|---|---|
+| *"El flujo no reconstruye el efectivo declarado: diferencia de X"* | **La más importante.** El flujo debe llegar al mismo efectivo que declara el estado. Si no llega, algo no calza: revise que ambos estados sean de períodos consecutivos y que el archivo cuadre |
+| *"No se encontraron en ninguno de los dos estados: …"* | Cuentas que el reporte busca por nombre y no aparecen. Salen en cero. Suele significar que la cuenta cambió de nombre en el archivo de origen |
+| *"Líneas del formato oficial que el sistema no alimenta…"* | Posiciones que el formato contempla pero el Estado de Situación Financiera no provee. Salen siempre en cero: **no las lea como «no hubo movimiento»** |
+
+> Las dos últimas líneas del reporte (**Efectivo declarado** y **Diferencia**) son el control de cuadre. **Si la diferencia no es cero, no emita el reporte.**
+
 > **El contador general es, junto con el auditor, uno de los dos roles con permiso de descarga** (`reportes:descargar`). El operador bancario puede ver los reportes pero no descargarlos.
 
 ---
@@ -1238,6 +1250,14 @@ Los mensajes se dividen en tres clases:
 | *"El archivo no contiene líneas de balanza"* | Encabezados válidos, sin filas | Verifique el rango exportado |
 | Estado **Con diferencias** | Débitos ≠ créditos | **No continúe.** Corrija en el origen y vuelva a importar. Impide cerrar el período |
 
+**Estado de Situación Financiera**
+
+| Mensaje o estado | Qué pasó | Qué hacer |
+|---|---|---|
+| Estado **Con diferencias** con *"El estado no cuadra…"* | Total ACTIVOS no coincide con pasivos más patrimonio | Corrija en el sistema que genera el Excel y vuelva a importar |
+| Estado **Con diferencias** con *"…aparece N veces con importes distintos"* | Un concepto se repite con importes que no coinciden | Corrija el archivo de origen: el reporte no puede elegir cuál usar |
+| *"No se pudo verificar el cuadre contable…"* | Falta una de las dos líneas de cierre | Informativo. El archivo se importa, pero nadie verificó que cuadre |
+
 **Catálogo contable**
 
 | Mensaje | Qué pasó | Qué hacer |
@@ -1551,6 +1571,26 @@ El sistema **reconoce automáticamente** los encabezados más usados por la banc
 | *"El archivo no contiene hojas para procesar"* | El Excel está vacío o dañado |
 
 > **Es la fuente exclusiva del estado de flujo de efectivo.** El reporte compara el *Saldo Final* de este estado entre períodos. Importe uno por cada mes que deba aparecer en el flujo.
+
+**Revisión automática al importar**
+
+El sistema revisa el archivo antes de guardarlo y deja el resultado por escrito en la columna Estado:
+
+| Estado | Cuándo | Consecuencia |
+|---|---|---|
+| **Procesado** | El estado cuadra y no hay conceptos ambiguos | Se puede continuar |
+| **Con diferencias** | Total ACTIVOS no coincide con pasivos más patrimonio, o un concepto se repite con importes distintos | **Impide cerrar el período** |
+| **Error** | El archivo no se pudo leer | Revise formato y encabezados |
+
+Bajo el estado aparece el motivo. Ejemplos reales del texto que muestra:
+
+- *"El estado no cuadra: Total ACTIVOS 1000.00 contra pasivos más patrimonio 950.00, diferencia 50.00."*
+- *"El concepto «Total INCREMENTO O DECREMENTO» aparece 2 veces con importes distintos (500.00, 700.00). Los reportes no pueden decidir cuál usar."*
+- *"El concepto «Total INCREMENTO O DECREMENTO» aparece 2 veces con el mismo importe; se toma una sola vez."* — informativo, no bloquea.
+
+> **Un concepto repetido con el mismo importe no es problema** y el archivo se importa normalmente: el formato de origen repite alguna línea de total. Solo bloquea cuando los importes difieren, porque ahí el reporte tendría que elegir uno.
+
+> **Si falta Total ACTIVOS o el total de pasivos más patrimonio**, el sistema no puede verificar el cuadre y lo dice explícitamente en vez de darlo por bueno.
 
 ---
 

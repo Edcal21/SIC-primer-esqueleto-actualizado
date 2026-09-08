@@ -100,3 +100,96 @@ test("usa Total EFECTIVO y no Total ACTIVOS CORRIENTES cuando difieren", () => {
   assert.equal(linea(reporte, "Efectivo declarado en el Estado de Situación Financiera"), 92500);
   assert.equal(linea(reporte, "Diferencia contra el efectivo declarado"), 0);
 });
+
+// --- Revisión del Estado de Situación Financiera al importarlo ---
+
+const { revisarSituacionFinanciera } = await import("../lib/situacion-financiera.ts");
+const filaEstado = (concepto, saldoFinal) => ({ numeroLinea: 1, concepto, saldoFinal: saldoFinal.toFixed(2), esTotal: /^total\b/i.test(concepto) });
+
+test("un estado que cuadra pasa como procesado", () => {
+  const revision = revisarSituacionFinanciera([
+    filaEstado("Total ACTIVOS", 1000),
+    filaEstado("Total PASIVOS CORRIENTES", 400),
+    filaEstado("Total PATRIMONIO", 600),
+  ]);
+  assert.equal(revision.estado, "procesado");
+  assert.deepEqual(revision.observaciones, []);
+});
+
+test("un estado descuadrado queda con diferencias y explica la brecha", () => {
+  const revision = revisarSituacionFinanciera([
+    filaEstado("Total ACTIVOS", 1000),
+    filaEstado("TOTAL PASIVOS Y PATRIMONIO + PATRIMONIO", 950),
+  ]);
+  assert.equal(revision.estado, "con_diferencias");
+  assert.match(revision.observaciones[0], /no cuadra/);
+  assert.match(revision.observaciones[0], /50\.00/);
+});
+
+test("si falta una de las dos líneas de cierre lo dice en vez de darlo por bueno", () => {
+  const revision = revisarSituacionFinanciera([filaEstado("Total ACTIVOS", 1000)]);
+  assert.equal(revision.estado, "procesado", "no se puede afirmar que esté mal");
+  assert.match(revision.observaciones[0], /No se pudo verificar el cuadre/);
+});
+
+test("un concepto repetido con el mismo importe se anota pero no bloquea", () => {
+  // El formato real de la institución repite la línea de total del incremento patrimonial.
+  const revision = revisarSituacionFinanciera([
+    filaEstado("Total ACTIVOS", 1000),
+    filaEstado("Total PASIVOS CORRIENTES", 400),
+    filaEstado("Total PATRIMONIO", 600),
+    filaEstado("Total INCREMENTO O DECREMENTO", 500),
+    filaEstado("Total INCREMENTO O DECREMENTO", 500),
+  ]);
+  assert.equal(revision.estado, "procesado", "el archivo real de la institución debe seguir importándose");
+  assert.match(revision.observaciones.join(" "), /aparece 2 veces con el mismo importe/);
+});
+
+test("un concepto repetido con importes distintos queda con diferencias", () => {
+  const revision = revisarSituacionFinanciera([
+    filaEstado("Total ACTIVOS", 1000),
+    filaEstado("Total PASIVOS CORRIENTES", 400),
+    filaEstado("Total PATRIMONIO", 600),
+    filaEstado("Total INCREMENTO O DECREMENTO", 500),
+    filaEstado("Total INCREMENTO O DECREMENTO", 700),
+  ]);
+  assert.equal(revision.estado, "con_diferencias");
+  assert.match(revision.observaciones.join(" "), /importes distintos/);
+});
+
+// --- Advertencias del reporte ---
+
+test("advierte los conceptos que no aparecen en ninguno de los dos estados", () => {
+  const sinDepreciacion = estado("2026-05", Object.fromEntries(
+    ACTUAL.filas.filter(fila => !fila.concepto.startsWith("DEPRECIACION")).map(fila => [fila.concepto, fila.saldoFinal]),
+  ));
+  const anteriorSinDepreciacion = estado("2026-04", Object.fromEntries(
+    ANTERIOR.filas.filter(fila => !fila.concepto.startsWith("DEPRECIACION")).map(fila => [fila.concepto, fila.saldoFinal]),
+  ));
+  const reporte = reporteFlujoDesdeSituaciones(sinDepreciacion, anteriorSinDepreciacion, "May 2026", "Abr 2026");
+  const aviso = reporte.advertencias.find(item => item.includes("No se encontraron"));
+  assert.ok(aviso, "debe advertir los conceptos ausentes");
+  assert.match(aviso, /DEPRECIACION DE VEHICULOS/);
+});
+
+test("advierte cuando el flujo no reconstruye el efectivo declarado", () => {
+  const inconsistente = estado("2026-05", Object.fromEntries(
+    ACTUAL.filas.map(fila => [fila.concepto, fila.concepto === "Total EFECTIVO" ? 99999 : fila.saldoFinal]),
+  ));
+  const reporte = reporteFlujoDesdeSituaciones(inconsistente, ANTERIOR, "May 2026", "Abr 2026");
+  assert.ok(reporte.advertencias.some(item => item.includes("no reconstruye el efectivo declarado")));
+});
+
+test("lista las posiciones del formato oficial que el estado no alimenta", () => {
+  const reporte = reporteFlujoDesdeSituaciones(ACTUAL, ANTERIOR, "May 2026", "Abr 2026");
+  const aviso = reporte.advertencias.find(item => item.includes("no alimenta"));
+  assert.ok(aviso);
+  assert.match(aviso, /Cuentas por cobrar a empleados/);
+  assert.match(aviso, /Retenciones por pagar/);
+});
+
+test("un flujo correcto y completo no genera advertencias de descuadre", () => {
+  const reporte = reporteFlujoDesdeSituaciones(ACTUAL, ANTERIOR, "May 2026", "Abr 2026");
+  assert.equal(reporte.advertencias.some(item => item.includes("no reconstruye")), false);
+  assert.equal(reporte.advertencias.some(item => item.includes("No se encontraron")), false);
+});

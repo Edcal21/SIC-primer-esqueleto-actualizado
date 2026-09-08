@@ -269,7 +269,10 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
                   <td>{item.periodo}</td>
                   <td>{item.totalLineas}</td>
                   <td>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</td>
-                  <td><span className={statusClass(item.estado)}>{item.estado === "procesado" ? "Procesado" : "Error"}</span></td>
+                  <td>
+                    <span className={statusClass(item.estado)}>{estadoImportacion(item.estado)}</span>
+                    {item.observaciones ? <small className="observacionImportacion">{item.observaciones}</small> : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

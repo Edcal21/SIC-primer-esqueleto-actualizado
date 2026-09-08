@@ -68,6 +68,76 @@ export function extraerFilasSituacionFinanciera(rows: SheetRow[]): SituacionFina
   return { filas };
 }
 
+export type RevisionSituacion = {
+  estado: "procesado" | "con_diferencias";
+  observaciones: string[];
+};
+
+const claveConcepto = (concepto: string) => normalizar(concepto);
+const buscar = (filas: SituacionFinancieraRow[], ...conceptos: string[]) => {
+  const claves = conceptos.map(claveConcepto);
+  const fila = filas.find(item => claves.includes(claveConcepto(item.concepto)));
+  return fila ? Number(fila.saldoFinal) : null;
+};
+
+/**
+ * Revisa un Estado de Situación Financiera ya leído antes de guardarlo. No corrige nada: decide si
+ * el archivo entra como "procesado" o como "con_diferencias" y deja por escrito qué encontró.
+ *
+ * Dos controles:
+ *  - Cuadre contable: Total ACTIVOS contra el total de pasivos más patrimonio. Si alguna de las dos
+ *    líneas no está, no se puede verificar y eso también se anota; el silencio no es aprobación.
+ *  - Conceptos repetidos: el formato de origen repite alguna línea de total. Mientras el importe sea
+ *    el mismo es inofensivo y solo se anota, pero si difieren el reporte tendría que elegir uno y
+ *    el archivo se marca con diferencias.
+ */
+export function revisarSituacionFinanciera(filas: SituacionFinancieraRow[]): RevisionSituacion {
+  const observaciones: string[] = [];
+  let estado: RevisionSituacion["estado"] = "procesado";
+
+  const activos = buscar(filas, "Total ACTIVOS");
+  const pasivosYPatrimonio = buscar(filas, "TOTAL PASIVOS Y PATRIMONIO + PATRIMONIO", "Total PASIVOS Y PATRIMONIO MAS PATRIMONIO");
+  const pasivos = buscar(filas, "Total PASIVOS CORRIENTES");
+  const patrimonio = buscar(filas, "Total PATRIMONIO");
+  const contraparte = pasivosYPatrimonio ?? (pasivos !== null && patrimonio !== null ? pasivos + patrimonio : null);
+
+  if (activos === null || contraparte === null) {
+    observaciones.push(
+      `No se pudo verificar el cuadre contable: falta ${activos === null ? "la línea Total ACTIVOS" : "el total de pasivos más patrimonio"} en el archivo.`,
+    );
+  } else {
+    const diferencia = Math.round((activos - contraparte) * 100) / 100;
+    if (Math.abs(diferencia) >= 0.01) {
+      estado = "con_diferencias";
+      observaciones.push(
+        `El estado no cuadra: Total ACTIVOS ${activos.toFixed(2)} contra pasivos más patrimonio ${contraparte.toFixed(2)}, diferencia ${diferencia.toFixed(2)}.`,
+      );
+    }
+  }
+
+  const porConcepto = new Map<string, { nombre: string; saldos: number[] }>();
+  for (const fila of filas) {
+    const clave = claveConcepto(fila.concepto);
+    const grupo = porConcepto.get(clave) ?? { nombre: fila.concepto, saldos: [] };
+    grupo.saldos.push(Number(fila.saldoFinal));
+    porConcepto.set(clave, grupo);
+  }
+  for (const { nombre, saldos } of porConcepto.values()) {
+    if (saldos.length < 2) continue;
+    const distintos = new Set(saldos.map(saldo => saldo.toFixed(2)));
+    if (distintos.size > 1) {
+      estado = "con_diferencias";
+      observaciones.push(
+        `El concepto "${nombre}" aparece ${saldos.length} veces con importes distintos (${[...distintos].join(", ")}). Los reportes no pueden decidir cuál usar.`,
+      );
+    } else {
+      observaciones.push(`El concepto "${nombre}" aparece ${saldos.length} veces con el mismo importe; se toma una sola vez.`);
+    }
+  }
+
+  return { estado, observaciones };
+}
+
 export function leerSituacionFinanciera(buffer: ArrayBuffer): SituacionFinancieraProcesada {
   const workbook = XLSX.read(buffer, { type: "array" });
   const sheetName = workbook.SheetNames[0];
