@@ -10,6 +10,7 @@ type Db = ReturnType<typeof getDb>;
 type BalanzaPeriodo = { periodo: string; filas: { codigo: string; concepto: string; debe: number; haber: number; saldo: number }[] };
 type SituacionPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
 const filaComparativa = (concepto:string, actual:number, anterior:number, extra:Partial<FilaReporte>={}):FilaReporte => ({ concepto, actual, anterior, variacion:actual-anterior, ...extra });
+const ceroLimpio = (valor: number) => Object.is(valor, -0) ? 0 : valor;
 
 export const catalogoReportes: { tipo: TipoReporte; titulo: string; descripcion: string }[] = [
   { tipo:"flujo-efectivo", titulo:"Estado de flujo de efectivo", descripcion:"Compara el Saldo Final del Estado de Situación Financiera entre períodos." },
@@ -76,6 +77,8 @@ const saldoPorConcepto = (periodo: SituacionPeriodo | null, ...conceptos: string
 };
 const variacionSaldo = (actual: SituacionPeriodo, anterior: SituacionPeriodo | null, ...conceptos: string[]) =>
   saldoPorConcepto(actual, ...conceptos) - saldoPorConcepto(anterior, ...conceptos);
+const variacionPasivo = (actual: SituacionPeriodo, anterior: SituacionPeriodo | null, ...conceptos: string[]) =>
+  -variacionSaldo(actual, anterior, ...conceptos);
 const sumar = (valores: number[]) => valores.reduce((total, valor) => total + valor, 0);
 const totalExcedentes = (periodo: SituacionPeriodo | null) => sumar([
   saldoPorConcepto(periodo, "Excedente Ingresos s/Egresos acumulados"),
@@ -90,7 +93,7 @@ const etiquetaFinPeriodo = (periodo: string) => {
 
 /** Construye las líneas del formato oficial a partir de las variaciones de Saldo Final. */
 export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
-  const utilidad = totalExcedentes(actual) - totalExcedentes(anterior);
+  const utilidad = ceroLimpio(-(totalExcedentes(actual) - totalExcedentes(anterior)));
   const depreciacion = sumar([
     variacionSaldo(actual, anterior, "DEPRECIACION DE VEHICULOS"),
     variacionSaldo(actual, anterior, "DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS"),
@@ -101,11 +104,11 @@ export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior:
     0, 0, 0, 0,
     variacionSaldo(actual, anterior, "Total ACTIVOS POR IMPUESTOS DIFERIDOS"),
     0, 0, 0,
-    variacionSaldo(actual, anterior, "Total ACREEDORES COMERCIALES"),
+    variacionPasivo(actual, anterior, "Total ACREEDORES COMERCIALES"),
     0,
-    variacionSaldo(actual, anterior, "Total IMPUESTOS CORRIENTES POR PAGAR"),
+    variacionPasivo(actual, anterior, "Total IMPUESTOS CORRIENTES POR PAGAR"),
     0,
-    variacionSaldo(actual, anterior, "Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS"),
+    variacionPasivo(actual, anterior, "Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS"),
     0, 0,
   ];
   const cambioDeAnio = Boolean(anterior && actual.periodo.slice(0, 4) !== anterior.periodo.slice(0, 4));
@@ -178,7 +181,23 @@ export function reporteSituacionComparativaDesdeSituaciones(actual: SituacionPer
   };
 }
 
-function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+function esCuentaDetalle(fila: BalanzaPeriodo["filas"][number], filas: BalanzaPeriodo["filas"]) {
+  return !filas.some(otra => otra.codigo !== fila.codigo && otra.codigo.startsWith(fila.codigo.replace(/0+$/, "")));
+}
+
+function filasDetalle(filas: BalanzaPeriodo["filas"]) {
+  return filas.filter(fila => esCuentaDetalle(fila, filas));
+}
+
+function totalClase(filas: BalanzaPeriodo["filas"], clase: string) {
+  const prefijo = { activo: "1", pasivo: "2", patrimonio: "3", ingreso: "4", gasto: "5" }[clase];
+  if (!prefijo) return 0;
+  const cuentaMayor = filas.find(fila => fila.codigo === `${prefijo}0000000`);
+  if (cuentaMayor) return cuentaMayor.saldo;
+  return filasDetalle(filas).filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
+}
+
+export function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
   const meta = catalogoReportes.find(item => item.tipo === tipo)!;
   if (tipo === "balanza-anual") {
     const filas: FilaReporte[] = actual.filas.map(fila => ({ codigo: fila.codigo, concepto: fila.concepto, actual: fila.debe, anterior: fila.haber, variacion: fila.debe - fila.haber }));
@@ -188,8 +207,9 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
   }
 
   const anteriores = new Map((anterior?.filas ?? []).map(fila => [fila.codigo, fila]));
-  const clases = tipo === "resultado-comparativo" ? ["ingreso", "gasto"] : ["activo", "pasivo", "patrimonio"];
-  const filas = actual.filas
+  const clases = tipo === "resultado-comparativo" ? ["ingreso", "gasto"] : ["patrimonio"];
+  const detalleActual = filasDetalle(actual.filas);
+  const filas = detalleActual
     .filter(fila => clases.includes(claseCuenta(fila.codigo)))
     .map(fila => {
       const saldoAnterior = anteriores.get(fila.codigo)?.saldo ?? 0;
@@ -197,8 +217,8 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
     });
 
   for (const clase of clases) {
-    const actuales = actual.filas.filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
-    const previos = (anterior?.filas ?? []).filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
+    const actuales = totalClase(actual.filas, clase);
+    const previos = totalClase(anterior?.filas ?? [], clase);
     filas.push(filaComparativa(`Total ${clase}`, actuales, previos, { esTotal: true }));
   }
 

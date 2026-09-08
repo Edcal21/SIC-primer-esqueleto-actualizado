@@ -59,18 +59,18 @@ test("el flujo aplica el mapeo oficial y conserva en cero las actividades sin fu
   assert.equal(valores.get("Utilidad o pérdida del período"), 0);
   assert.equal(valores.get("Depreciación"), -70);
   assert.equal(valores.get("Impuestos pagados por adelantado"), 30);
-  assert.equal(valores.get("Acreedores Comerciales"), 40);
-  assert.equal(valores.get("Impuestos por pagar"), -10);
-  assert.equal(valores.get("Gastos acumulados por pagar"), 20);
+  assert.equal(valores.get("Acreedores Comerciales"), -40);
+  assert.equal(valores.get("Impuestos por pagar"), 10);
+  assert.equal(valores.get("Gastos acumulados por pagar"), -20);
   assert.equal(valores.get("Patrimonio"), 100);
   assert.equal(valores.get("Mobiliario y Equipo de Oficina"), 10);
   assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), 0);
   assert.equal(valores.get("Cuentas por cobrar a empleados"), 0);
-  assert.equal(valores.get("Efectivo neto utilizado en las actividades de operación"), 10);
+  assert.equal(valores.get("Efectivo neto utilizado en las actividades de operación"), -90);
   assert.equal(valores.get("Efectivo neto utilizado en las actividades de inversión"), 60);
-  assert.equal(valores.get("Aumento (Disminución) neto en el efectivo"), -70);
+  assert.equal(valores.get("Aumento (Disminución) neto en el efectivo"), 30);
   assert.equal(valores.get("Efectivo al 31 de Mayo 2026"), 800);
-  assert.equal(valores.get("Efectivo al 30 de Junio 2026"), 730);
+  assert.equal(valores.get("Efectivo al 30 de Junio 2026"), 830);
 });
 
 test("al cambiar de año traslada los excedentes del período comparativo con signo inverso", async () => {
@@ -79,7 +79,7 @@ test("al cambiar de año traslada los excedentes del período comparativo con si
   const anterior = { periodo: "2025-12", filas: [fila("Excedente Ingresos s/Egresos acumulados", 1000), fila("Excedente Ingresos s/Egresos del ejercicio", 250), fila("Total ACTIVOS CORRIENTES", 5000)] };
   const reporte = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "diciembre de 2025");
   const valores = new Map(reporte.filas.map(item => [item.concepto, item.actual]));
-  assert.equal(valores.get("Utilidad o pérdida del período"), -1200);
+  assert.equal(valores.get("Utilidad o pérdida del período"), 1200);
   assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), -1250);
   assert.equal(valores.get("Efectivo al 31 de Diciembre 2025"), 5000);
 });
@@ -126,7 +126,68 @@ test("los dos excedentes aparecen en la comparación y la variación de sus suma
   });
 
   const flujo = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "mayo de 2026");
-  assert.equal(flujo.filas.find(item => item.concepto === "Utilidad o pérdida del período")?.actual, -50);
+  assert.equal(flujo.filas.find(item => item.concepto === "Utilidad o pérdida del período")?.actual, 50);
+});
+
+test("el flujo real de junio 2026 cuadra contra el efectivo final del Estado de Situación", async () => {
+  const { reporteFlujoDesdeSituaciones } = await import(`../lib/reportes.ts?real-flujo=${Date.now()}`);
+  const actual = { periodo: "2026-06", filas: [
+    fila("Total ACTIVOS CORRIENTES", 608636.09),
+    fila("Excedente Ingresos s/Egresos acumulados", -1150276.77), fila("Excedente Ingresos s/Egresos del ejercicio", 78548.57),
+    fila("DEPRECIACION DE VEHICULOS", -2848393.22), fila("DEPRECIACION DE MOB Y EQUIPO", -1694006.76),
+    fila("Total ACTIVOS POR IMPUESTOS DIFERIDOS", 230902.63), fila("Total ACREEDORES COMERCIALES", 1461703.86),
+    fila("Total IMPUESTOS CORRIENTES POR PAGAR", 501002.64), fila("Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS", 4739781.33),
+    fila("Total PATRIMONIO IGLESIA UNIVERSAL DEL REINO DE DIOS", 18848167.86),
+    fila("EDIFICIOS", 76421621.07), fila("MOBILIARIO Y EQUIPOS", 6765515.40), fila("VEHICULOS", 5528915.56), fila("TERRENOS", 15725500.25),
+    fila("Total INCREMENTO O DECREMENTO", 76259763.53),
+  ] };
+  const anterior = { periodo: "2026-05", filas: [
+    fila("Total ACTIVOS CORRIENTES", 501152.60),
+    fila("Excedente Ingresos s/Egresos acumulados", -1013951.51), fila("Excedente Ingresos s/Egresos del ejercicio", -136325.26),
+    fila("DEPRECIACION DE VEHICULOS", -2794494.53), fila("DEPRECIACION DE MOB Y EQUIPO", -1585458.08),
+    fila("Total ACTIVOS POR IMPUESTOS DIFERIDOS", 190561.06), fila("Total ACREEDORES COMERCIALES", 1579461.95),
+    fila("Total IMPUESTOS CORRIENTES POR PAGAR", 482206.45), fila("Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS", 4707167.97),
+    fila("Total PATRIMONIO IGLESIA UNIVERSAL DEL REINO DE DIOS", 18848167.86),
+    fila("EDIFICIOS", 76421621.07), fila("MOBILIARIO Y EQUIPOS", 6738693.06), fila("VEHICULOS", 5528915.56), fila("TERRENOS", 15725500.25),
+    fila("Total INCREMENTO O DECREMENTO", 76259763.53),
+  ] };
+
+  const reporte = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "mayo de 2026");
+  const valores = new Map(reporte.filas.map(item => [item.concepto, item.actual]));
+  assert.equal(Math.round((valores.get("Aumento (Disminución) neto en el efectivo") ?? 0) * 100) / 100, 107483.49);
+  assert.equal(Math.round((valores.get("Efectivo al 30 de Junio 2026") ?? 0) * 100) / 100, 608636.09);
+});
+
+test("los reportes comparativos desde balanza no suman cuentas padre e hijas dos veces", async () => {
+  const { reporteBalanza } = await import(`../lib/reportes.ts?balanza-jerarquia=${Date.now()}`);
+  const actual = { periodo: "2026-06", filas: [
+    { codigo: "40000000", concepto: "INGRESOS", debe: 0, haber: 100, saldo: 100 },
+    { codigo: "41000000", concepto: "INGRESOS ORDINARIOS", debe: 0, haber: 100, saldo: 100 },
+    { codigo: "41010100", concepto: "DIEZMOS", debe: 0, haber: 100, saldo: 100 },
+    { codigo: "50000000", concepto: "GASTOS", debe: 40, haber: 0, saldo: 40 },
+    { codigo: "51000000", concepto: "GASTOS ADMINISTRATIVOS", debe: 40, haber: 0, saldo: 40 },
+    { codigo: "51010100", concepto: "SERVICIOS BASICOS", debe: 40, haber: 0, saldo: 40 },
+    { codigo: "30000000", concepto: "PATRIMONIO", debe: 0, haber: 0, saldo: 500 },
+    { codigo: "31000000", concepto: "PATRIMONIO INSTITUCIONAL", debe: 0, haber: 0, saldo: 500 },
+    { codigo: "31010100", concepto: "PATRIMONIO", debe: 0, haber: 0, saldo: 500 },
+  ] };
+  const anterior = { periodo: "2026-05", filas: [
+    { codigo: "40000000", concepto: "INGRESOS", debe: 0, haber: 70, saldo: 70 },
+    { codigo: "41000000", concepto: "INGRESOS ORDINARIOS", debe: 0, haber: 70, saldo: 70 },
+    { codigo: "41010100", concepto: "DIEZMOS", debe: 0, haber: 70, saldo: 70 },
+    { codigo: "50000000", concepto: "GASTOS", debe: 25, haber: 0, saldo: 25 },
+    { codigo: "51000000", concepto: "GASTOS ADMINISTRATIVOS", debe: 25, haber: 0, saldo: 25 },
+    { codigo: "51010100", concepto: "SERVICIOS BASICOS", debe: 25, haber: 0, saldo: 25 },
+    { codigo: "30000000", concepto: "PATRIMONIO", debe: 0, haber: 0, saldo: 450 },
+  ] };
+
+  const resultado = reporteBalanza("resultado-comparativo", actual, anterior, "junio de 2026", "mayo de 2026");
+  const patrimonio = reporteBalanza("cambio-patrimonio", actual, anterior, "junio de 2026", "mayo de 2026");
+  assert.equal(resultado.filas.find(item => item.concepto === "Total ingreso")?.actual, 100);
+  assert.equal(resultado.filas.find(item => item.concepto === "Total gasto")?.actual, 40);
+  assert.equal(resultado.filas.filter(item => item.codigo).length, 2);
+  assert.equal(patrimonio.filas.find(item => item.concepto === "Total patrimonio")?.actual, 500);
+  assert.equal(patrimonio.filas.some(item => item.codigo?.startsWith("1") || item.codigo?.startsWith("2")), false);
 });
 
 test("la exportación Excel conserva la plantilla, las fórmulas y los recursos gráficos", async () => {
