@@ -1,7 +1,7 @@
 import { getDb } from "../../../db";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
-import { abrirPeriodo, esPeriodoValido, impedimentosParaCerrar, listarPeriodos, periodosConActividad } from "../../../lib/periodos";
+import { abrirPeriodo, esPeriodoValido, impactoDeReapertura, impedimentosParaCerrar, listarPeriodos, periodosConActividad } from "../../../lib/periodos";
 import { codigoPostgres } from "../../../lib/security";
 
 type PeriodoPayload = { periodo?: string };
@@ -24,10 +24,18 @@ export async function GET(request: Request) {
         periodos.filter(fila => fila.estado !== "cerrado").map(async fila => [fila.periodo, await impedimentosParaCerrar(db, fila.periodo)] as const),
       ))
       : {};
+    // Qué queda desactualizado si se reabre. Solo aplica a los períodos cerrados, que son los
+    // únicos que ofrecen la acción de reapertura.
+    const impactosReapertura = puedeAdministrar
+      ? Object.fromEntries(await Promise.all(
+        periodos.filter(fila => fila.estado === "cerrado").map(async fila => [fila.periodo, await impactoDeReapertura(db, fila.periodo)] as const),
+      ))
+      : {};
 
     return Response.json({
       periodos,
       impedimentos,
+      impactosReapertura,
       periodosConActividad: puedeAdministrar ? await periodosConActividad(db) : [],
       puedeAdministrar,
     }, { headers: { "Cache-Control": "no-store" } });

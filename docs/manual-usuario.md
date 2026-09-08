@@ -42,7 +42,7 @@
 10. Cierre mensual paso a paso
 11. Conciliar una cuenta en dólares
 12. Corregir un registro ya ingresado
-13. Reabrir un período cerrado
+13. Reabrir un período cerrado — 13.1 Cuándo se justifica · 13.2 Procedimiento · 13.3 La advertencia de impacto · 13.4 Qué ocurre al reabrir · 13.5 Después de reabrir
 
 **PARTE IV — OPERACIÓN Y SOPORTE**
 14. Solución de problemas — 14.1 Antes de escalar · 14.2 Cómo leer un mensaje de error · 14.3 Acceso · 14.4 Minutas · 14.5 Estados de cuenta · 14.6 Conciliación · 14.7 Importaciones · 14.8 Períodos · 14.9 Tasas de cambio · 14.10 Administración · 14.11 Reportes · 14.12 Errores del sistema · 14.13 Escalamiento · 14.14 Qué incluir al reportar
@@ -729,7 +729,7 @@ Menú → **Cierre contable**. Controla qué períodos admiten cambios.
 
 **Qué bloquea un período cerrado:** registro y anulación de minutas, importación de balanza, carga de estados de cuenta, generación y aprobación de conciliaciones, y registro de tasas de cambio — siempre que la fecha caiga dentro del período.
 
-**Reabrir:** exige un **motivo de al menos 15 caracteres**. El procedimiento completo está en el **capítulo 13**.
+**Reabrir:** exige un **motivo de al menos 15 caracteres**. Antes de confirmar, el sistema enumera qué balanzas, estados financieros, períodos posteriores y conciliaciones aprobadas quedarán desactualizados. Es una advertencia, no un bloqueo. El procedimiento completo está en el **capítulo 13**.
 
 ---
 
@@ -1036,11 +1036,32 @@ El sistema confirma: *"Minuta anulada y registrada en auditoría"*. El asiento q
 2. Ubique el período con estado **Cerrado**.
 3. En la columna **Acciones**, escriba el **Motivo de reapertura** en el cuadro de texto. Mínimo **15 caracteres**.
 4. Presione **Reabrir período**.
-5. Lea la ventana de confirmación y confirme.
+5. **Lea la advertencia de la ventana de confirmación** antes de confirmar. Ver 13.3.
 
 El sistema informa: *"Período AAAA-MM reabierto; el motivo quedó registrado"*.
 
-### 13.3 Qué ocurre al reabrir
+### 13.3 La advertencia de impacto
+
+Antes de confirmar, el sistema enumera **qué queda desactualizado** si usted reabre el período:
+
+| Advertencia | Qué significa |
+|---|---|
+| **Balanzas de comprobación que quedarán desactualizadas** | Balanzas importadas de este período y posteriores. Son archivos importados: **no se recalculan solos** |
+| **Estados de situación financiera que quedarán desactualizados** | Son la fuente del flujo de efectivo. Habrá que reimportarlos y regenerar los reportes |
+| **Períodos posteriores ya cerrados** | Siguen bloqueados y arrastran las cifras anteriores al cambio. Si el ajuste los afecta, habrá que reabrirlos también |
+| **Conciliaciones aprobadas del período** | Volverán a admitir cambios; si toca sus minutas, deberá revisarlas y aprobarlas de nuevo |
+
+En la tabla, los períodos cerrados con impacto muestran **⚠ reabrir desactualiza N elemento(s)**.
+
+> **La advertencia informa, no bloquea.** La reapertura sigue siendo posible: la decisión es suya. Lo que el sistema garantiza es que no la tome sin conocer las consecuencias.
+
+> ### Por qué el sistema no recalcula solo
+>
+> La balanza de comprobación y el estado de situación financiera **no se derivan de las minutas**: son archivos que alguien importa. Alterar un período ya cerrado no los modifica, y los períodos posteriores siguen arrastrando las cifras viejas.
+>
+> Por eso el paso 4 de 13.4 no es opcional: **si no reimporta, el sistema queda internamente inconsistente y no vuelve a avisarlo.**
+
+### 13.4 Qué ocurre al reabrir
 
 **Sí ocurre:**
 - Se levanta el bloqueo: el período vuelve a admitir minutas, cargas, conciliaciones e importaciones.
@@ -1053,7 +1074,7 @@ El sistema informa: *"Período AAAA-MM reabierto; el motivo quedó registrado"*.
 - **No se revierten** las conciliaciones aprobadas.
 - **No se anulan** las minutas del período.
 
-### 13.4 Después de reabrir
+### 13.5 Después de reabrir
 
 1. Ejecute la corrección que motivó la reapertura.
 2. Si afectó cuentas bancarias, regenere y vuelva a aprobar la conciliación correspondiente.

@@ -8,6 +8,8 @@ export type Conciliacion = { id: string; reporteId: string; cuentaBancariaNumero
 export type EstadoPeriodo = "abierto" | "revision" | "cerrado";
 export type PeriodoContable = { periodo: string; estado: EstadoPeriodo; fechaApertura: string; fechaCierre: string | null; cerradoPor: string | null; cerradoPorNombre: string | null; reabiertoPor: string | null; reabiertoPorNombre: string | null; reabiertoEn: string | null; motivoReapertura: string | null; creadoEn: string; actualizadoEn: string };
 export type ImpedimentoCierre = { motivo: string; detalle: string };
+/** Lo que queda desactualizado al reabrir un período; se muestra antes de confirmar, no bloquea. */
+export type ImpactoReapertura = { motivo: string; detalle: string };
 /** Un período solo bloquea cuando está explícitamente cerrado; si no está en la lista, está abierto. */
 export const periodoCerrado = (periodos: PeriodoContable[], periodo: string) =>
   periodos.some(item => item.periodo === periodo && item.estado === "cerrado");

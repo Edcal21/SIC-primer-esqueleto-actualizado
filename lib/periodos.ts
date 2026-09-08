@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, ne, sql } from "drizzle-orm";
 import type { getDb } from "../db";
-import { conciliacionesBancarias, importacionesBalanza, periodosContables } from "../db/schema";
+import { conciliacionesBancarias, importacionesBalanza, importacionesSituacionFinanciera, periodosContables } from "../db/schema";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -162,6 +162,61 @@ export async function reabrirPeriodo(db: Db, periodo: string, usuario: { id: str
     .where(eq(periodosContables.periodo, periodo))
     .returning();
   return fila ?? null;
+}
+
+export type ImpactoReapertura = { motivo: string; detalle: string };
+
+/**
+ * Qué queda desactualizado al reabrir un período. La balanza y el estado de situación financiera
+ * son archivos importados, no derivados de las minutas: alterar un período ya cerrado no los
+ * recalcula, y los períodos posteriores arrastran las cifras viejas. Esta función no bloquea nada;
+ * solo permite advertirlo antes de confirmar, para que la reapertura sea una decisión informada.
+ */
+export async function impactoDeReapertura(db: Db, periodo: string): Promise<ImpactoReapertura[]> {
+  const [balanzas, estadosFinancieros, posterioresCerrados, conciliaciones] = await Promise.all([
+    db.select({ periodo: importacionesBalanza.periodo, archivo: importacionesBalanza.archivoNombre })
+      .from(importacionesBalanza).where(gte(importacionesBalanza.periodo, periodo)),
+    db.select({ periodo: importacionesSituacionFinanciera.periodo, archivo: importacionesSituacionFinanciera.archivoNombre })
+      .from(importacionesSituacionFinanciera).where(gte(importacionesSituacionFinanciera.periodo, periodo)),
+    db.select({ periodo: periodosContables.periodo })
+      .from(periodosContables)
+      .where(and(gt(periodosContables.periodo, periodo), eq(periodosContables.estado, "cerrado")))
+      .orderBy(asc(periodosContables.periodo)),
+    db.select({ id: conciliacionesBancarias.id, cuenta: conciliacionesBancarias.cuentaBancariaNumero })
+      .from(conciliacionesBancarias)
+      .where(and(eq(conciliacionesBancarias.periodo, periodo), eq(conciliacionesBancarias.estado, "aprobada"))),
+  ]);
+
+  const impactos: ImpactoReapertura[] = [];
+
+  if (balanzas.length) {
+    const periodos = [...new Set(balanzas.map(fila => fila.periodo))].sort();
+    impactos.push({
+      motivo: "Balanzas de comprobación que quedarán desactualizadas",
+      detalle: `${balanzas.length} importación(es) de ${periodos.join(", ")}. Son archivos importados: no se recalculan solos. Si altera ${periodo}, vuelva a importarlas.`,
+    });
+  }
+  if (estadosFinancieros.length) {
+    const periodos = [...new Set(estadosFinancieros.map(fila => fila.periodo))].sort();
+    impactos.push({
+      motivo: "Estados de situación financiera que quedarán desactualizados",
+      detalle: `${estadosFinancieros.length} importación(es) de ${periodos.join(", ")}. Son la fuente del flujo de efectivo: reimpórtelos y regenere los reportes afectados.`,
+    });
+  }
+  if (posterioresCerrados.length) {
+    impactos.push({
+      motivo: "Períodos posteriores ya cerrados",
+      detalle: `${posterioresCerrados.map(fila => fila.periodo).join(", ")}. Siguen bloqueados y arrastran las cifras de ${periodo} anteriores al cambio. Si el ajuste los afecta, habrá que reabrirlos también.`,
+    });
+  }
+  if (conciliaciones.length) {
+    impactos.push({
+      motivo: "Conciliaciones aprobadas del período",
+      detalle: `${conciliaciones.length} conciliación(es) aprobada(s): ${conciliaciones.map(fila => fila.cuenta).join(", ")}. Volverán a admitir cambios; si toca sus minutas, deberá revisarlas y aprobarlas de nuevo.`,
+    });
+  }
+
+  return impactos;
 }
 
 /** Períodos con actividad contable registrada, para sugerir cuáles administrar. */

@@ -9,6 +9,7 @@ import * as schema from "../db/schema.ts";
 import {
   abrirPeriodo,
   cerrarPeriodo,
+  impactoDeReapertura,
   impedimentosParaCerrar,
   obtenerPeriodo,
   primerPeriodoCerrado,
@@ -43,6 +44,7 @@ async function limpiar() {
   await db.delete(schema.iglesias).where(eq(schema.iglesias.codigo, IGLESIA));
   for (const periodo of [CERRADO, ABIERTO, CON_PENDIENTES, CON_DIFERENCIAS]) {
     await db.delete(schema.importacionesBalanza).where(eq(schema.importacionesBalanza.periodo, periodo));
+    await db.delete(schema.importacionesSituacionFinanciera).where(eq(schema.importacionesSituacionFinanciera.periodo, periodo));
     await db.delete(schema.periodosContables).where(eq(schema.periodosContables.periodo, periodo));
   }
 }
@@ -166,4 +168,35 @@ test("la reapertura no borra ni recalcula la información del período", async (
   const detallesDespues = await db.select().from(schema.detallesMovimientos).where(eq(schema.detallesMovimientos.movimientoId, antes[0].id));
   assert.deepEqual(despues, antes, "los movimientos del período quedan exactamente igual tras cerrar y reabrir");
   assert.deepEqual(detallesDespues, detallesAntes, "los importes y tasas del detalle tampoco se recalculan");
+});
+
+test("la reapertura advierte qué queda desactualizado sin bloquear la acción", async () => {
+  // CERRADO = 2026-03; CON_PENDIENTES = 2026-05 y CON_DIFERENCIAS = 2026-06 son posteriores.
+  await db.insert(schema.importacionesBalanza).values({
+    archivoNombre: "balanza-marzo.xlsx", archivoTamano: 1024, periodo: CERRADO, estado: "procesado",
+    totalLineas: 10, totalDebe: "100.00", totalHaber: "100.00", importadoPor: ADMIN.id,
+  });
+  await db.insert(schema.importacionesSituacionFinanciera).values({
+    archivoNombre: "situacion-mayo.xlsx", archivoTamano: 512, periodo: CON_PENDIENTES,
+    estado: "procesado", totalLineas: 5, importadoPor: ADMIN.id,
+  });
+  await cerrarPeriodo(db, CON_DIFERENCIAS, ADMIN);
+
+  const impactos = await impactoDeReapertura(db, CERRADO);
+  const motivos = impactos.map(item => item.motivo).join(" | ");
+
+  assert.match(motivos, /Balanzas de comprobación/);
+  assert.match(motivos, /Estados de situación financiera/);
+  assert.match(motivos, /Períodos posteriores ya cerrados/);
+
+  const posteriores = impactos.find(item => item.motivo.includes("Períodos posteriores"));
+  assert.match(posteriores.detalle, new RegExp(CON_DIFERENCIAS));
+
+  // La advertencia informa: la reapertura sigue siendo posible.
+  const reabierto = await reabrirPeriodo(db, CERRADO, ADMIN, "Auditoría externa solicita reproceso");
+  assert.equal(reabierto.estado, "abierto");
+
+  // Un período sin nada posterior ni importado no genera advertencias.
+  const sinImpacto = await impactoDeReapertura(db, "2099-12");
+  assert.equal(sinImpacto.length, 0);
 });

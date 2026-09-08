@@ -1,7 +1,7 @@
 "use client";
 import { type FormEvent, useEffect, useState } from "react";
 import MenuIcon from "../components/MenuIcon";
-import { currentMonth, type ImpedimentoCierre, type PeriodoContable, type RequestConfirmation } from "../shared";
+import { currentMonth, type ImpactoReapertura, type ImpedimentoCierre, type PeriodoContable, type RequestConfirmation } from "../shared";
 
 const MOTIVO_MINIMO = 15;
 
@@ -19,6 +19,7 @@ const fechaLegible = (valor: string | null) => valor ? new Date(valor).toLocaleS
 export default function CierreContable({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [periodos, setPeriodos] = useState<PeriodoContable[]>([]);
   const [impedimentos, setImpedimentos] = useState<Record<string, ImpedimentoCierre[]>>({});
+  const [impactos, setImpactos] = useState<Record<string, ImpactoReapertura[]>>({});
   const [sugeridos, setSugeridos] = useState<string[]>([]);
   const [motivos, setMotivos] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -29,10 +30,11 @@ export default function CierreContable({ notify, requestConfirmation }: { notify
     setLoading(true);
     try {
       const response = await fetch("/api/periodos");
-      const data = await response.json().catch(() => ({})) as { periodos?: PeriodoContable[]; impedimentos?: Record<string, ImpedimentoCierre[]>; periodosConActividad?: string[]; error?: string };
+      const data = await response.json().catch(() => ({})) as { periodos?: PeriodoContable[]; impedimentos?: Record<string, ImpedimentoCierre[]>; impactosReapertura?: Record<string, ImpactoReapertura[]>; periodosConActividad?: string[]; error?: string };
       if (!response.ok) return setError(data.error ?? "No se pudo cargar el control de períodos");
       setPeriodos(data.periodos ?? []);
       setImpedimentos(data.impedimentos ?? {});
+      setImpactos(data.impactosReapertura ?? {});
       setSugeridos(data.periodosConActividad ?? []);
       setError("");
     } catch {
@@ -98,9 +100,15 @@ export default function CierreContable({ notify, requestConfirmation }: { notify
     if (motivo.length < MOTIVO_MINIMO) {
       return setError(`Escriba el motivo de la reapertura de ${periodo} con al menos ${MOTIVO_MINIMO} caracteres antes de continuar`);
     }
+    const afectados = impactos[periodo] ?? [];
+    // La balanza y el estado de situación financiera son archivos importados: reabrir no los
+    // recalcula. Se enumeran aquí para que quien reabre sepa qué deberá reimportar después.
+    const advertencia = afectados.length
+      ? ` Quedarán desactualizados: ${afectados.map(item => `${item.motivo} — ${item.detalle}`).join(" ")}`
+      : " No hay balanzas, estados financieros ni períodos posteriores que queden desactualizados.";
     requestConfirmation({
       title: `Reabrir el período ${periodo}`,
-      message: `Se levantará el bloqueo de ${periodo} y volverá a admitir cambios contables. No se borra ni se recalcula nada de lo ya registrado. Su usuario, la fecha y el motivo quedarán en auditoría de forma permanente.`,
+      message: `Se levantará el bloqueo de ${periodo} y volverá a admitir cambios contables. No se borra ni se recalcula nada de lo ya registrado.${advertencia} Su usuario, la fecha y el motivo quedarán en auditoría de forma permanente.`,
       confirmLabel: "Reabrir período",
       isDanger: true,
       onConfirm: () => accion(periodo, "reabrir", motivo),
@@ -134,6 +142,10 @@ export default function CierreContable({ notify, requestConfirmation }: { notify
             <td>
               <span className={estadoClase(item.estado)}>{etiquetaEstado[item.estado]}</span>
               {bloqueos.length && item.estado !== "cerrado" ? <small className="status pending">{bloqueos.length} pendiente(s) para cerrar</small> : null}
+              {/* Sin la clase `status`: esa regla aplica text-transform: capitalize y deforma el texto. */}
+              {item.estado === "cerrado" && (impactos[item.periodo] ?? []).length
+                ? <small title={(impactos[item.periodo] ?? []).map(impacto => impacto.motivo).join("; ")}>⚠ reabrir desactualiza {(impactos[item.periodo] ?? []).length} elemento(s)</small>
+                : null}
             </td>
             <td><small>{fechaLegible(item.fechaApertura)}</small></td>
             <td>{item.estado === "cerrado"
