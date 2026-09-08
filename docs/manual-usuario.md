@@ -45,7 +45,7 @@
 13. Reabrir un período cerrado
 
 **PARTE IV — OPERACIÓN Y SOPORTE**
-14. Solución de problemas
+14. Solución de problemas — 14.1 Antes de escalar · 14.2 Cómo leer un mensaje de error · 14.3 Acceso · 14.4 Minutas · 14.5 Estados de cuenta · 14.6 Conciliación · 14.7 Importaciones · 14.8 Períodos · 14.9 Tasas de cambio · 14.10 Administración · 14.11 Reportes · 14.12 Errores del sistema · 14.13 Escalamiento · 14.14 Qué incluir al reportar
 15. Respaldos
 16. Contactos y alcance del soporte
 
@@ -1059,9 +1059,314 @@ El sistema informa: *"Período AAAA-MM reabierto; el motivo quedó registrado"*.
 
 ## 14. Solución de problemas
 
-> _Sección en elaboración. Se completará durante la capacitación con las consultas reales de los usuarios._
+Este capítulo lista los mensajes que el sistema puede mostrar, qué significan y qué hacer. Están agrupados **por la pantalla donde aparecen**, no por orden alfabético.
 
-Formato de cada entrada: **Mensaje del sistema → Causa → Qué hacer → A quién escalar**.
+### 14.1 Antes de escalar: tres comprobaciones
+
+La mayoría de las consultas de soporte se resuelven con una de estas tres. Hágalas siempre antes de reportar un problema:
+
+| # | Comprobación | Cómo |
+|---|---|---|
+| **1** | **¿La pantalla está desactualizada?** | Presione **Actualizar** en el panel. Si otra persona trabajó sobre el mismo registro, usted puede estar viendo datos viejos |
+| **2** | **¿La sesión sigue viva?** | La sesión dura 8 horas. Si dejó la pantalla abierta desde ayer, cierre sesión y vuelva a ingresar |
+| **3** | **¿Es un problema de permisos?** | Si el mensaje empieza con *"No tiene permiso para…"*, no es una falla: su rol no incluye esa operación. Vea el capítulo 4 |
+
+### 14.2 Cómo leer un mensaje de error
+
+Los mensajes del SIC casi siempre **contienen la instrucción para resolverlos**. Compare:
+
+> *"Falta registrar la tasa de cambio USD → NIO para el 2026-03-15. Regístrela en Configuración → Tasas de cambio antes de continuar."*
+
+El mensaje dice qué falta, para qué fecha y dónde se arregla. Léalo completo antes de escalar.
+
+Los mensajes se dividen en tres clases:
+
+| Clase | Cómo se reconoce | Quién lo resuelve |
+|---|---|---|
+| **De datos** | Describe qué falta o qué no cuadra | El propio usuario |
+| **De permisos** | Empieza con *"No tiene permiso para…"* | El Administrador |
+| **Del sistema** | Empieza con *"No se pudo…"* | El responsable técnico |
+
+---
+
+### 14.3 Acceso al sistema
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Usuario y contraseña son obligatorios"* | Falta uno de los dos campos | Complete ambos | — |
+| *"Credenciales incorrectas"* | Usuario o contraseña equivocados, o el usuario está inactivo | Verifique mayúsculas y el teclado. Si persiste, pida restablecimiento | Administrador |
+| *"El sistema no está configurado para operar de forma segura. Avise al administrador."* | El servidor no tiene configurado el secreto de sesión. **El sistema no opera hasta corregirlo** | No reintente. Reporte de inmediato | **Responsable técnico** |
+| Se cierra la sesión sola | Pasaron las 8 horas | Vuelva a ingresar. No es una falla | — |
+
+---
+
+### 14.4 Registro y anulación de minutas
+
+**Al registrar**
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Marque al menos una línea como la que afecta la cuenta bancaria de la minuta"* | Ninguna línea tiene la casilla **Línea bancaria** | Marque la línea que representa el movimiento real del banco (ver 6.1) | — |
+| *"Las líneas que afectan la cuenta bancaria deben ir todas en la misma dirección…"* | Marcó una línea de débito y una de crédito como bancarias | La minuta representa una entrada **y** una salida: regístrelas por separado | — |
+| *"Debe agregar al menos dos detalles para cumplir partida doble"* | La minuta tiene una sola línea | Agregue la contrapartida | — |
+| *"La minuta debe cuadrar: débitos y créditos tienen que ser iguales"* | Los totales no coinciden | Revise el redondeo en el origen. El sistema exige igualdad exacta | — |
+| *"La minuta no cumple las reglas contables de partida doble"* | La base de datos rechazó el asiento al guardarlo | Revise las líneas. Si el asiento se ve correcto, reporte con captura | Responsable técnico |
+| *"Complete cuenta y monto en todas las líneas"* | Hay líneas incompletas | Complete o elimine las líneas vacías | — |
+| *"Hay líneas con un código que no pertenece al catálogo de cuentas de movimiento"* | Usó una cuenta de agrupación, no de movimiento | Elija una cuenta marcada como *cuenta de movimiento* | Administrador, si falta la cuenta |
+| *"Tipo inválido; utilice crédito o débito"* | Valor inesperado en el tipo de línea | Vuelva a seleccionar el tipo | — |
+| *"La iglesia seleccionada no existe o está inactiva"* | La iglesia se desactivó | Elija otra iglesia o pida la reactivación | Administrador |
+| *"La cuenta bancaria seleccionada no existe o está inactiva"* | La cuenta se desactivó | Elija otra o pida la reactivación | Administrador |
+| *"Falta registrar la tasa de cambio USD → NIO para el AAAA-MM-DD…"* | Cuenta en dólares sin tasa para esa fecha | Solicite el registro de la tasa. **Usted no tiene ese permiso** | Administrador |
+| *"Ya existe una minuta registrada con la misma fecha, iglesia, cuenta bancaria y referencia"* | Duplicado exacto | Verifique en Minutas si ya la registró. Si es legítimamente distinta, cambie la referencia | — |
+| *"El período AAAA-MM está cerrado…"* | La fecha cae en un mes cerrado | Solicite la reapertura con justificación (cap. 13), o registre en el período corriente si corresponde | Administrador |
+| *"Concepto es obligatorio"* / *"La iglesia es obligatoria"* / *"La cuenta bancaria es obligatoria"* / *"Fecha inválida"* | Falta un campo de la cabecera | Complete el campo | — |
+
+**Al anular**
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Indique el motivo de la anulación con al menos 10 caracteres"* | Motivo vacío o muy corto | Escriba la causa real, no "error" (ver 12.1) | — |
+| *"El movimiento ya está anulado"* | Ya fue anulada | Actualice la pantalla | — |
+| *"Solo se admite la anulación de movimientos registrados"* | La minuta no está vigente | Actualice la pantalla | — |
+| *"El movimiento está enlazado a la línea N de una conciliación bancaria… Deshaga el enlace en la pantalla de conciliación"* | La minuta está conciliada | Vaya a Conciliación, deshaga el enlace y vuelva a intentar | — |
+| *"Movimiento no encontrado"* | El registro ya no existe o cambió | Actualice la pantalla | — |
+
+---
+
+### 14.5 Carga de estados de cuenta
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Seleccione la cuenta bancaria del estado de cuenta"* | No eligió la cuenta | Elija la cuenta antes del archivo | — |
+| *"Seleccione un archivo"* | No adjuntó archivo | Adjunte el archivo | — |
+| *"Formato no permitido; use CSV o Excel"* | El archivo no es `.csv`, `.xlsx` ni `.xls` | Un PDF del banco no sirve. Descargue el formato correcto del portal | — |
+| *"El archivo supera el límite de 10 MB"* | Archivo muy grande | Divida el estado de cuenta por rangos de fecha | — |
+| *"No se reconoció el encabezado del estado bancario. Se necesita una columna de descripción o concepto y otra de débito, crédito o monto."* | Los encabezados no coinciden con ningún alias conocido | Abra el archivo y renombre las columnas según el **Anexo B.1** | — |
+| *"El archivo tiene encabezados válidos pero ninguna fila de movimientos"* | El rango descargado está vacío | Verifique las fechas en el portal del banco | — |
+| *"El archivo no contiene hojas para procesar"* | Excel vacío o dañado | Vuelva a descargarlo del portal | — |
+| *"El período AAAA-MM está cerrado…"* | El estado de cuenta cae en un mes cerrado | Solicite la reapertura (cap. 13) | Administrador |
+
+---
+
+### 14.6 Conciliación bancaria
+
+**Al generar**
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Seleccione el reporte bancario a conciliar"* | No eligió estado de cuenta | Elija uno de la lista | — |
+| *"Solo se pueden conciliar reportes bancarios procesados"* | El estado de cuenta quedó en error | Vuelva a cargarlo (14.5) | — |
+| *"Este reporte bancario ya tiene una conciliación generada"* | Ya existe | Ábrala desde el listado en vez de generar otra | — |
+| *"El reporte no tiene cuenta bancaria asociada; vuelva a cargarlo indicando la cuenta"* | Se cargó sin elegir cuenta | Cargue de nuevo el archivo seleccionando la cuenta | — |
+
+**Al enlazar líneas**
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Seleccione el movimiento contable a enlazar"* | No eligió la minuta | Selecciónela en la lista de la fila | — |
+| *"La moneda de la línea no coincide con la cuenta bancaria"* | Desajuste de moneda | Verifique que el estado de cuenta se cargó en la cuenta correcta | — |
+| *"Esta línea es de una cuenta USD y no tiene tasa de cambio registrada para su fecha; está pendiente de completar. Registre la tasa del día en Configuración…"* | Línea histórica en dólares sin tasa | Solicite el registro de la tasa de esa fecha. El sistema **no la estima** (ver 11.3) | Administrador |
+| *"Moneda, importe o datos históricos incompatibles con la línea bancaria"* | La minuta elegida no corresponde: distinta moneda, importe o dirección | Verifique importe original y sentido (entrada/salida) | — |
+| *"El movimiento está anulado y no puede conciliarse"* | La minuta fue anulada | Elija la minuta vigente que la reemplazó | — |
+| *"El movimiento ya está enlazado con otra línea bancaria"* | Doble enlace | Busque la otra línea y deshaga el enlace si fue un error | — |
+| *"El movimiento pertenece a otra cuenta bancaria"* | La minuta es de otra cuenta | Elija una minuta de la misma cuenta | — |
+| *"Línea bancaria no encontrada en este reporte"* | La línea cambió o el reporte se recargó | Actualice la pantalla | — |
+
+**Al aprobar o rechazar**
+
+| Mensaje | Qué pasó | Qué hacer | Escalar a |
+|---|---|---|---|
+| *"Indique el motivo del rechazo en las observaciones"* | Rechazo sin observaciones | Escriba qué debe corregirse: el operador solo tiene ese texto | — |
+| *"No se puede aprobar: quedan N líneas bancarias sin conciliar ni descartar"* | Hay pendientes | Devuelva la conciliación al operador o trabaje las líneas | — |
+| *"No se puede aprobar: existen líneas sin tasa o enlaces incompatibles/incompletos"* | Hay líneas en dólares sin tasa, o enlaces incompletos | Registre las tasas faltantes y revise los enlaces | — |
+| *"La conciliación ya fue revisada"* | Otra persona la aprobó o rechazó antes | Actualice la pantalla | — |
+| *"El período AAAA-MM está cerrado…"* | El período se cerró mientras trabajaba | Solicite la reapertura (cap. 13) | Administrador |
+
+---
+
+### 14.7 Importaciones contables
+
+**Comunes a los cuatro importadores**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"Formato no permitido; use CSV o Excel"* | Formato incorrecto | Convierta a `.csv`, `.xlsx` o `.xls` |
+| *"El archivo supera el límite de 10 MB"* | Archivo muy grande | Divídalo |
+| *"El archivo no contiene hojas para procesar"* | Excel vacío o dañado | Verifique el archivo de origen |
+| *"Período inválido; use formato YYYY-MM"* | Período mal escrito | Use AAAA-MM (ejemplo: 2026-09) |
+
+**Balanza de comprobación**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"No se encontraron encabezados de balanza: Cuenta, Descripción, Débitos y Créditos"* | Encabezados no reconocidos | Renombre las columnas (Anexo B.2) |
+| *"El archivo no contiene líneas de balanza"* | Encabezados válidos, sin filas | Verifique el rango exportado |
+| Estado **Con diferencias** | Débitos ≠ créditos | **No continúe.** Corrija en el origen y vuelva a importar. Impide cerrar el período |
+
+**Catálogo contable**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"No tiene permiso para importar catálogo contable"* | Su rol no incluye `catalogo:administrar` | **Limitación conocida** (ver 7.1). Solicítelo al Administrador |
+| *"No se encontraron encabezados de catálogo: Código/Cuenta y Descripción/Nombre"* | Faltan las columnas obligatorias | Renombre las columnas (Anexo B.3) |
+| *"El archivo no contiene cuentas contables"* | Encabezados válidos, sin filas | Verifique el archivo |
+| *"El código debe tener 8 dígitos"* | Códigos de otra longitud | Los códigos son de **exactamente 8 caracteres**. Corrija el archivo |
+| *"Naturaleza inválida"* / *"Clasificación de flujo inválida"* / *"Estado inválido"* | Valores no reconocidos | Use los valores de la tabla del Anexo B.3 |
+
+**Auxiliar contable**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"No se encontraron encabezados de auxiliar: Fecha y Cuenta"* | Faltan las columnas obligatorias | Renombre las columnas (Anexo B.4) |
+| *"El archivo no contiene movimientos para importar"* | Sin filas de datos | Verifique el archivo |
+| *"El auxiliar contiene movimientos que no cumplen partida doble"* | Algún movimiento no cuadra | Corrija el archivo. **Ningún movimiento se importa si uno falla** |
+| *"El auxiliar contiene un movimiento duplicado por fecha, iglesia, cuenta bancaria y referencia"* | Duplicado dentro del archivo, o ya existe en el sistema | Revise el archivo y las minutas ya registradas |
+| *"…trae débito y crédito en la misma línea"* | Una fila con ambos valores | Separe en dos filas |
+| *"…no trae monto válido"* | Fila sin importe legible | Revise el formato numérico de esa fila |
+| *"El período AAAA-MM está cerrado…"* | Algún movimiento cae en un mes cerrado | Divida el archivo o solicite la reapertura |
+
+**Estado de Situación Financiera**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"No se encontraron los encabezados Descripción y Saldo Final…"* | Faltan las columnas obligatorias | Renombre las columnas (Anexo B.5) |
+| *"No se encontraron valores numéricos en la columna Saldo Final"* | La columna trae texto, o números como texto | Convierta la columna a número en Excel |
+| *"El archivo no contiene líneas con Saldo Final"* | Encabezados válidos, sin datos | Verifique el archivo |
+
+---
+
+### 14.8 Cierre de períodos
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"Período inválido; use el formato AAAA-MM"* | Formato incorrecto | Use AAAA-MM (ejemplo: 2026-09) |
+| *"Ese período ya está registrado"* | Ya existe en la lista | Búsquelo en la tabla |
+| *"El período no está registrado; ábralo antes de administrarlo"* | Se intentó cerrar sin abrirlo | Ábralo con **Abrir período** |
+| *"El período ya está cerrado"* / *"El período ya está en revisión"* | Otra persona lo cambió antes | Actualice la pantalla |
+| *"El período está cerrado; reabralo antes de marcarlo en revisión"* | Orden incorrecto de acciones | Reabra primero |
+| *"Solo se puede reabrir un período cerrado"* | El período no está cerrado | Verifique el estado en la tabla |
+| *"Indique el motivo de la reapertura con al menos 15 caracteres"* | Motivo vacío o corto | Escriba la justificación real (cap. 13) |
+| El botón **Cerrar período** está deshabilitado | Hay impedimentos | Pase el cursor sobre el botón: el sistema los lista. Suelen ser conciliaciones en borrador o balanzas con diferencias |
+
+---
+
+### 14.9 Tasas de cambio
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"La tasa es obligatoria"* / *"La tasa de cambio debe ser mayor que cero"* | Tasa vacía, cero o negativa | Digite la tasa correcta |
+| *"Indique la fuente de la tasa (por ejemplo, BCN o el banco correspondiente)"* | Falta la fuente | Documente de dónde salió la tasa |
+| *"Ya existe una tasa registrada para esa fecha; edítela en vez de crear una nueva"* | Duplicado | Búsquela en la tabla y edítela |
+| *"Moneda inválida; use NIO o USD"* | Moneda no soportada | El sistema solo maneja USD → NIO |
+| *"Tasa de cambio no encontrada"* | El registro ya no existe | Actualice la pantalla |
+
+> **Corregir una tasa nunca recalcula minutas ya guardadas.** Si el error afectó asientos ya registrados, hay que anularlos y volver a registrarlos (cap. 12).
+
+---
+
+### 14.10 Administración
+
+**Usuarios y roles**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"Usuario inválido; use 3 a 40 caracteres en minúsculas, números, punto, guion o guion bajo"* | Nombre de usuario con formato inválido | Corrija el nombre |
+| *"La contraseña debe tener al menos 8 caracteres"* | Contraseña corta | Use una más larga |
+| *"No se pudo crear el usuario; verifique que el nombre de usuario no exista"* | Usuario duplicado | Elija otro nombre |
+| *"No puede cambiar su propio rol ni inactivar su usuario"* | Protección contra autobloqueo | Pida a otro administrador que lo haga |
+| *"El rol administrador debe conservar permisos administrativos"* | Se intentó dejar al administrador sin permisos | Protección del sistema: no se puede |
+| *"La lista de permisos contiene valores inválidos"* | Permiso inexistente | Use los del Anexo A |
+
+**Catálogo, iglesias y cuentas bancarias**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"El código debe tener 8 dígitos"* / *"El código de iglesia debe tener 8 dígitos"* | Longitud incorrecta | Use exactamente 8 caracteres |
+| *"No se pudo crear la cuenta; verifique que el código no exista"* | Código duplicado | Búsquela en el catálogo: puede estar inactiva |
+| *"Ya existe una cuenta bancaria con ese número"* | Número duplicado | Búsquela: puede estar inactiva |
+| *"No se puede cambiar la moneda: esta cuenta ya tiene minutas o estados de cuenta registrados en su moneda actual"* | La cuenta tiene historial | **No se puede cambiar.** Cree una cuenta nueva y desactive la incorrecta (ver 8.4) |
+| *"El nombre de la cuenta bancaria es obligatorio"* / *"El número de cuenta es obligatorio"* | Campos vacíos | Complete los campos |
+| *"No hay cambios para guardar"* | Se guardó sin modificar nada | No es un error |
+
+**Configuración institucional**
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"El logo institucional debe ser una ruta interna que comience con /"* | Se puso una dirección externa | Use una ruta interna, por ejemplo `/universal-nicaragua-login.png` |
+| *"… admite hasta N caracteres"* / *"… no puede quedar vacío"* | Longitud del campo | Ajuste el texto |
+
+---
+
+### 14.11 Reportes
+
+| Mensaje | Qué pasó | Qué hacer |
+|---|---|---|
+| *"No tiene permiso para descargar reportes"* | Su rol solo permite ver | Solicite la descarga al Contador general o al Auditor |
+| *"La exportación Excel está disponible para el flujo de efectivo"* | Se pidió Excel de otro reporte | Solo el flujo de efectivo tiene formato oficial en Excel |
+| *"El reporte no contiene los períodos requeridos para exportar Excel"* | Faltan Estados de Situación Financiera importados | Importe el estado de cada período que debe aparecer (ver 7.1) |
+| *"No se pudo cargar la plantilla de flujo de efectivo"* | La plantilla oficial no está disponible en el servidor | Reporte: es un problema de instalación |
+| *"Granularidad inválida"* / *"Período inválido"* / *"Mes inválido"* / *"Trimestre inválido"* | Parámetro fuera de rango | Vuelva a seleccionar desde la pantalla |
+| El reporte sale vacío | No hay datos para el período, o falta el estado financiero importado | Verifique en Importaciones que el período esté cargado |
+
+---
+
+### 14.12 Errores del sistema
+
+Los mensajes que empiezan con **"No se pudo…"** indican una falla del servidor o de la base de datos, no un error del usuario.
+
+| Mensaje | Qué significa |
+|---|---|
+| *"No se pudo guardar el movimiento"* | La operación falló al escribir en la base de datos |
+| *"No se pudo cargar el historial bancario"* | El sistema no pudo leer los datos |
+| *"No se pudo generar la conciliación bancaria"* | La operación falló a mitad de camino |
+| *"No se pudo conectar con el servicio de…"* | El navegador no alcanzó al servidor |
+
+**Qué hacer**
+
+1. **Reintente una vez.** Puede ser una interrupción momentánea.
+2. Si vuelve a fallar, **no siga reintentando**: anote la hora exacta, la pantalla y qué estaba haciendo.
+3. Escale al responsable técnico con esa información.
+
+**Caso especial: conflicto contable**
+
+> *"Conflicto contable: actualice la pantalla y vuelva a intentar"*
+
+**No es una falla.** Significa que otra persona estaba guardando algo sobre los mismos datos en ese mismo instante, y el sistema serializó las operaciones para no corromper la contabilidad.
+
+**Qué hacer:** presione **Actualizar**, verifique que su cambio no se haya aplicado ya, y repita la operación.
+
+---
+
+### 14.13 Cuándo y a quién escalar
+
+| Síntoma | Escalar a | Qué informar |
+|---|---|---|
+| *"No tiene permiso para…"* | Administrador | Su usuario, la pantalla y la operación |
+| Falta una tasa de cambio | Administrador | La fecha exacta |
+| Falta una cuenta o iglesia | Administrador | El código y el nombre |
+| Un período está cerrado y necesita registrar | Administrador | El período y la justificación |
+| Una conciliación fue rechazada | Operador bancario | El texto de las observaciones |
+| *"No se pudo…"* (después de un reintento) | **Responsable técnico** | Hora exacta, pantalla, operación, captura |
+| *"El sistema no está configurado para operar de forma segura"* | **Responsable técnico, de inmediato** | Hora y pantalla |
+| El sistema no carga o va muy lento | **Responsable técnico** | Hora, cuántas personas lo notan |
+
+### 14.14 Qué incluir al reportar un problema
+
+Un reporte útil tiene cinco datos. Sin ellos, el diagnóstico se vuelve adivinanza:
+
+1. **Usuario** con el que ingresó.
+2. **Fecha y hora** exactas.
+3. **Pantalla** donde ocurrió.
+4. **Qué estaba haciendo** (paso a paso, no "no funciona").
+5. **Captura de pantalla** con el mensaje completo visible.
+
+> **La bitácora de auditoría conserva el registro de la operación**, incluidos los intentos rechazados. Con la hora y el usuario, el responsable técnico puede reconstruir qué pasó.
+
+---
+
+> _Este capítulo se actualiza durante la capacitación y los primeros meses de operación. Cuando aparezca una consulta recurrente que no esté aquí, agréguela con el mismo formato: **mensaje → qué pasó → qué hacer → a quién escalar**._
+
+---
 
 ## 15. Respaldos
 
