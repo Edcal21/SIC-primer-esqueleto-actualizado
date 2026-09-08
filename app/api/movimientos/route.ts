@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { cuentasBancarias, detallesMovimientos, iglesias, lineasReporteBancario, movimientosCuentas } from "../../../db/schema";
+import { cuentasBancarias, cuentasContables, detallesMovimientos, iglesias, lineasReporteBancario, movimientosCuentas } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 import { construirDetallesMovimiento, type DetalleEntrada } from "../../../lib/movimientos";
@@ -74,8 +74,32 @@ export async function POST(request: Request) {
       .where(and(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa"))).limit(1);
     if (!cuentaBancaria) return jsonError("La cuenta bancaria seleccionada no existe o está inactiva", 400);
 
+    const codigosCuentas = [...new Set(detalles.map(detalle => detalle.cuentaCodigo?.trim()).filter((codigo): codigo is string => Boolean(codigo)))];
+    const cuentasValidas = codigosCuentas.length
+      ? await db.select({
+        codigo: cuentasContables.codigo,
+        descripcion: cuentasContables.descripcion,
+        esCuentaMovimiento: cuentasContables.esCuentaMovimiento,
+        estado: cuentasContables.estado,
+      }).from(cuentasContables).where(inArray(cuentasContables.codigo, codigosCuentas))
+      : [];
+    const mapaCuentas = new Map(cuentasValidas.map(cuenta => [cuenta.codigo, cuenta]));
+
+    for (const [index, detalle] of detalles.entries()) {
+      const codigo = detalle.cuentaCodigo?.trim() ?? "";
+      const cuenta = mapaCuentas.get(codigo);
+      if (!cuenta) return jsonError(`Línea ${index + 1}: La cuenta contable ${detalle.cuentaCodigo ?? ""} no existe en el catálogo`, 400);
+      if (cuenta.estado !== "activa") return jsonError(`Línea ${index + 1}: La cuenta contable ${codigo} está inactiva`, 400);
+      if (!cuenta.esCuentaMovimiento) return jsonError(`Línea ${index + 1}: La cuenta ${codigo} es de mayor/título; solo se admiten cuentas de movimiento`, 400);
+    }
+
+    const detallesConCatalogo = detalles.map(detalle => {
+      const codigo = detalle.cuentaCodigo?.trim() ?? "";
+      return { ...detalle, cuentaCodigo: codigo, cuentaNombre: mapaCuentas.get(codigo)?.descripcion };
+    });
+
     const tasaUsd = cuentaBancaria.moneda === "USD" ? await obtenerTasaVigente(db, fecha) : null;
-    const resultadoDetalles = construirDetallesMovimiento(detalles, { cuentaBancariaMoneda: cuentaBancaria.moneda, tasaUsd });
+    const resultadoDetalles = construirDetallesMovimiento(detallesConCatalogo, { cuentaBancariaMoneda: cuentaBancaria.moneda, tasaUsd });
     if (!resultadoDetalles.ok) return jsonError(resultadoDetalles.error, 400);
     const detallesNormalizados = resultadoDetalles.detalles;
 
