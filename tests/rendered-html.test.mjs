@@ -138,13 +138,46 @@ test("production auth configuration fails closed", async () => {
 });
 
 test("sensitive uploads are rate limited", async () => {
-  const [bankUpload, balanceUpload] = await Promise.all([
+  const [bankUpload, balanceUpload, catalogUpload, auxiliarUpload] = await Promise.all([
     readFile(new URL("../app/api/banco/reportes/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/importaciones/balanza/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/importaciones/catalogo/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/importaciones/auxiliar/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(bankUpload, /verificarRateLimit/, "la carga bancaria debe limitar intentos por IP");
   assert.match(balanceUpload, /verificarRateLimit/, "la importación de balanza debe limitar intentos por IP");
+  assert.match(catalogUpload, /verificarRateLimit/, "la importación de catálogo debe limitar intentos por IP");
+  assert.match(auxiliarUpload, /verificarRateLimit/, "la importación de auxiliar debe limitar intentos por IP");
+});
+
+test("chart of accounts import is a dedicated function", async () => {
+  const [catalogRoute, importacionesUi] = await Promise.all([
+    readFile(new URL("../app/api/importaciones/catalogo/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/Importaciones.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(catalogRoute, /leerCatalogoContable/, "la API debe procesar archivos de catálogo contable");
+  assert.match(catalogRoute, /puede\(user, "catalogo:administrar"\)/, "la importación de catálogo debe exigir administración de catálogo");
+  assert.match(catalogRoute, /insert\(cuentasContables\)/, "la importación debe crear o actualizar cuentas contables");
+  assert.match(catalogRoute, /Importó catálogo contable/, "la importación debe quedar auditada");
+  assert.match(importacionesUi, /Importar catálogo contable/, "la pantalla de importaciones debe exponer la carga de catálogo");
+  assert.match(importacionesUi, /\/api\/importaciones\/catalogo/, "la UI debe llamar la API dedicada de catálogo");
+});
+
+test("auxiliary ledger import creates accounting movements", async () => {
+  const [auxiliarRoute, importacionesUi] = await Promise.all([
+    readFile(new URL("../app/api/importaciones/auxiliar/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/Importaciones.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(auxiliarRoute, /leerAuxiliarContable/, "la API debe procesar archivos de auxiliar contable");
+  assert.match(auxiliarRoute, /puede\(user, "importaciones:administrar"\)/, "la importación de auxiliar debe exigir permiso de importaciones");
+  assert.match(auxiliarRoute, /insert\(movimientosCuentas\)/, "la importación debe crear movimientos contables");
+  assert.match(auxiliarRoute, /insert\(detallesMovimientos\)/, "la importación debe crear líneas de partida doble");
+  assert.match(auxiliarRoute, /Importó auxiliar contable/, "la importación debe quedar auditada");
+  assert.match(importacionesUi, /Importar auxiliar contable/, "la pantalla de importaciones debe exponer la carga de auxiliar");
+  assert.match(importacionesUi, /\/api\/importaciones\/auxiliar/, "la UI debe llamar la API dedicada de auxiliar");
 });
 
 test("church catalog is administrable from API and UI", async () => {
@@ -206,4 +239,40 @@ test("trial balance parser ignores report totals and preserves Excel row numbers
   assert.equal(result.filas[0].cuentaCodigo, "11010203");
   assert.equal(result.totalDebe, 25);
   assert.equal(result.totalHaber, 25);
+});
+
+test("chart of accounts parser accepts common accounting headers", async () => {
+  const parserUrl = new URL(`../lib/catalogo.ts?test=${process.pid}-${Date.now()}`, import.meta.url);
+  const { extraerFilasCatalogo } = await import(parserUrl.href);
+  const result = extraerFilasCatalogo([
+    ["Plan de cuentas"],
+    ["Código", "Descripción", "Nivel", "Naturaleza", "Flujo", "Movimiento", "Estado"],
+    ["10000000", "Activos", 1, "Deudora", "No aplica", "No", "Activa"],
+    ["11010203", "Banco LA FISE", 5, "Deudora", "Operación", "Sí", "Activa"],
+  ]);
+
+  assert.equal(result.filas.length, 2);
+  assert.equal(result.filas[1].numeroLinea, 4);
+  assert.equal(result.filas[1].codigo, "11010203");
+  assert.equal(result.filas[1].esCuentaMovimiento, true);
+  assert.equal(result.filas[1].clasificacionFlujo, "operación");
+  assert.equal(result.cuentasMovimiento, 1);
+  assert.equal(result.cuentasActivas, 2);
+});
+
+test("auxiliary ledger parser groups balanced accounting lines", async () => {
+  const parserUrl = new URL(`../lib/auxiliar.ts?test=${process.pid}-${Date.now()}`, import.meta.url);
+  const { extraerMovimientosAuxiliar } = await import(parserUrl.href);
+  const result = extraerMovimientosAuxiliar([
+    ["Auxiliar contable"],
+    ["Fecha", "Iglesia", "Cuenta bancaria", "Referencia", "Concepto", "Cuenta", "Nombre cuenta", "Débito", "Crédito"],
+    ["2026-06-15", "00000001", "11010203", "EG-001", "Pago servicios", "51010101", "Servicios básicos", 150, ""],
+    ["2026-06-15", "00000001", "11010203", "EG-001", "Pago servicios", "11010203", "Banco LA FISE", "", 150],
+  ]);
+
+  assert.equal(result.movimientos.length, 1);
+  assert.equal(result.totalLineas, 2);
+  assert.equal(result.movimientos[0].detalles.length, 2);
+  assert.equal(result.movimientos[0].totalDebitos, 150);
+  assert.equal(result.movimientos[0].totalCreditos, 150);
 });
