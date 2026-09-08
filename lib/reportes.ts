@@ -73,53 +73,87 @@ const saldoPorConcepto = (periodo: SituacionPeriodo | null, ...conceptos: string
 const variacionSaldo = (actual: SituacionPeriodo, anterior: SituacionPeriodo | null, ...conceptos: string[]) =>
   saldoPorConcepto(actual, ...conceptos) - saldoPorConcepto(anterior, ...conceptos);
 const sumar = (valores: number[]) => valores.reduce((total, valor) => total + valor, 0);
-const etiquetaFinPeriodo = (periodo: string) => {
+/** Los saldos vienen con dos decimales; restarlos en coma flotante deja ruido como 162447.3700000001.
+ *  El flujo se redondea a dos decimales para que la cifra impresa sea la cifra calculada. */
+const dosDecimales = (valor: number) => Math.round(valor * 100) / 100;
+/** Etiqueta de las dos filas de saldo de efectivo; el exportador Excel las ubica por este nombre. */
+export const etiquetaFinPeriodo = (periodo: string) => {
   const [year, month] = periodo.split("-").map(Number);
   const fecha = new Date(Date.UTC(year, month, 0));
   const mes = new Intl.DateTimeFormat("es-NI", { month: "long", timeZone: "UTC" }).format(fecha);
   return `Efectivo al ${fecha.getUTCDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)} ${year}`;
 };
 
-/** Construye las líneas del formato oficial a partir de las variaciones de Saldo Final. */
+/**
+ * Construye el flujo de efectivo por el método indirecto a partir de dos Estados de Situación
+ * Financiera importados. Sirve tanto para comparación mensual como anual.
+ *
+ * Convención de signos: el reporte muestra el efecto sobre el efectivo, con las salidas en
+ * negativo. Por eso cada línea aplica su signo según la naturaleza de la cuenta y NO se niega el
+ * total al final:
+ *
+ *   - resultado del período      → tal cual (una pérdida consume efectivo)
+ *   - depreciación               → se suma de vuelta (es gasto que no salió de caja)
+ *   - variación de activos       → con signo invertido (comprar un activo consume efectivo)
+ *   - variación de pasivos       → tal cual (deber más libera efectivo)
+ *   - variación de patrimonio    → tal cual (aportar capital ingresa efectivo)
+ *
+ * El resultado del período se toma como la VARIACIÓN del excedente entre ambos estados, no como su
+ * saldo. El sistema de origen arrastra el acumulado mes a mes (el "acumulados" de un mes es el
+ * total del mes anterior), así que usar el saldo arrastraría resultados ya reportados. La variación
+ * funciona igual comparando meses o años y no necesita un caso especial para el cambio de año.
+ */
 export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
-  const utilidad = sumar([
-    saldoPorConcepto(actual, "Excedente Ingresos s/Egresos acumulados"),
-    saldoPorConcepto(actual, "Excedente Ingresos s/Egresos del ejercicio"),
-  ]);
-  const depreciacion = sumar([
+  /** Variación de una cuenta de activo: aumentar el activo consume efectivo. */
+  const usoPorActivo = (...conceptos: string[]) => dosDecimales(-variacionSaldo(actual, anterior, ...conceptos));
+  /** Variación de una cuenta de pasivo o patrimonio: aumentarla libera efectivo. */
+  const origenPorPasivo = (...conceptos: string[]) => dosDecimales(variacionSaldo(actual, anterior, ...conceptos));
+
+  const resultadoPeriodo = dosDecimales(sumar([
+    variacionSaldo(actual, anterior, "Excedente Ingresos s/Egresos acumulados"),
+    variacionSaldo(actual, anterior, "Excedente Ingresos s/Egresos del ejercicio"),
+  ]));
+  // Las cuentas de depreciación son negativas y se vuelven más negativas: invertir su variación
+  // devuelve el gasto del período, que se suma porque nunca salió de caja.
+  const depreciacion = dosDecimales(-sumar([
     variacionSaldo(actual, anterior, "DEPRECIACION DE VEHICULOS"),
     variacionSaldo(actual, anterior, "DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS"),
-  ]);
+  ]));
+
   const operacion = [
-    utilidad,
+    resultadoPeriodo,
     depreciacion,
     0, 0, 0, 0,
-    variacionSaldo(actual, anterior, "Total ACTIVOS POR IMPUESTOS DIFERIDOS"),
+    usoPorActivo("Total ACTIVOS POR IMPUESTOS DIFERIDOS"),
     0, 0, 0,
-    variacionSaldo(actual, anterior, "Total ACREEDORES COMERCIALES"),
+    origenPorPasivo("Total ACREEDORES COMERCIALES"),
     0,
-    variacionSaldo(actual, anterior, "Total IMPUESTOS CORRIENTES POR PAGAR"),
+    origenPorPasivo("Total IMPUESTOS CORRIENTES POR PAGAR"),
     0,
-    variacionSaldo(actual, anterior, "Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS"),
+    origenPorPasivo("Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS"),
     0, 0,
   ];
-  const cambioDeAnio = Boolean(anterior && actual.periodo.slice(0, 4) !== anterior.periodo.slice(0, 4));
-  const excedenteAcumulado = cambioDeAnio ? -sumar([
-    saldoPorConcepto(anterior, "Excedente Ingresos s/Egresos acumulados"),
-    saldoPorConcepto(anterior, "Excedente Ingresos s/Egresos del ejercicio"),
-  ]) : 0;
   const inversion = [
-    variacionSaldo(actual, anterior, "EDIFICIOS"),
-    variacionSaldo(actual, anterior, "MOBILIARIO Y EQUIPOS", "MOBILIARIO Y EQUIPO DE OFICINA"),
-    variacionSaldo(actual, anterior, "VEHICULOS"),
-    variacionSaldo(actual, anterior, "TERRENOS"),
-    variacionSaldo(actual, anterior, "Total INCREMENTO O DECREMENTO"),
-    excedenteAcumulado,
+    usoPorActivo("EDIFICIOS"),
+    usoPorActivo("MOBILIARIO Y EQUIPOS", "MOBILIARIO Y EQUIPO DE OFICINA"),
+    usoPorActivo("VEHICULOS"),
+    usoPorActivo("TERRENOS"),
+    origenPorPasivo("Total INCREMENTO O DECREMENTO"),
+    // El arrastre del excedente acumulado es una reclasificación dentro del patrimonio: ya está
+    // recogido en el resultado del período y no mueve efectivo.
+    0,
   ];
-  const totalOperacion = sumar(operacion), totalInversion = sumar(inversion);
-  const aumentoNeto = -totalOperacion - totalInversion;
-  const efectivoInicial = saldoPorConcepto(anterior, "Total ACTIVOS CORRIENTES");
-  const efectivoFinal = efectivoInicial + aumentoNeto;
+
+  const totalOperacion = dosDecimales(sumar(operacion)), totalInversion = dosDecimales(sumar(inversion));
+  const aportesPatrimonio = origenPorPasivo("Total PATRIMONIO IGLESIA UNIVERSAL DEL REINO DE DIOS");
+  const aumentoNeto = dosDecimales(totalOperacion + totalInversion + aportesPatrimonio);
+  // "Total EFECTIVO" es el saldo de caja y bancos. Se cae a activos corrientes solo si el estado no
+  // trae esa línea: no son equivalentes en cuanto exista una cuenta por cobrar corriente.
+  const efectivoInicial = saldoPorConcepto(anterior, "Total EFECTIVO", "Total ACTIVOS CORRIENTES");
+  const efectivoFinal = dosDecimales(efectivoInicial + aumentoNeto);
+  const efectivoDeclarado = saldoPorConcepto(actual, "Total EFECTIVO", "Total ACTIVOS CORRIENTES");
+  const descuadre = dosDecimales(efectivoFinal - efectivoDeclarado);
+
   const nombresOperacion = ["Utilidad o pérdida del período", "Depreciación", "Cuentas por cobrar a empleados", "Anticipos a justificar", "Cuentas por cobrar por servicios", "Deudores comerciales y otras cuentas por Cobrar", "Impuestos pagados por adelantado", "Pagos anticipados", "Depósito en garantía", "Póliza de seguros", "Acreedores Comerciales", "Certificados a plazo fijo (fondos restringidos)", "Impuestos por pagar", "Retenciones por pagar", "Gastos acumulados por pagar", "Cuentas transitorias", "Depósito sin identificar"];
   const nombresInversion = ["Edificios", "Mobiliario y Equipo de Oficina", "Vehículos", "Terrenos", "Incremento o Decremento", "Excedente Ingresos/Egresos Acumulados"];
   const filas: FilaReporte[] = [
@@ -128,13 +162,17 @@ export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior:
     ...nombresOperacion.map((concepto, index) => ({ concepto, actual: operacion[index] })),
     { concepto: "Efectivo neto utilizado en las actividades de operación", actual: totalOperacion, esTotal: true },
     { concepto: "Flujo de efectivo de las actividades de inversión", actual: 0, esTotal: true, esEncabezado: true },
-    { concepto: "Patrimonio", actual: variacionSaldo(actual, anterior, "Total PATRIMONIO IGLESIA UNIVERSAL DEL REINO DE DIOS") },
+    { concepto: "Patrimonio", actual: aportesPatrimonio },
     ...nombresInversion.map((concepto, index) => ({ concepto, actual: inversion[index] })),
     { concepto: "Efectivo neto utilizado en las actividades de inversión", actual: totalInversion, esTotal: true },
     { concepto: "Efectivo neto utilizado en las actividades de financiamiento", actual: 0, esTotal: true },
     { concepto: "Aumento (Disminución) neto en el efectivo", actual: aumentoNeto, esTotal: true },
     { concepto: etiquetaFinPeriodo(anterior?.periodo ?? actual.periodo), actual: efectivoInicial, esTotal: true },
     { concepto: etiquetaFinPeriodo(actual.periodo), actual: efectivoFinal, esTotal: true },
+    // Control de calidad: el flujo debe reconstruir el efectivo que declara el propio estado.
+    // Sin esta comprobación el reporte cuadra siempre consigo mismo aunque el modelo esté mal.
+    { concepto: "Efectivo declarado en el Estado de Situación Financiera", actual: efectivoDeclarado, esTotal: true },
+    { concepto: "Diferencia contra el efectivo declarado", actual: descuadre, esTotal: true },
   ];
   const meta = catalogoReportes.find(item => item.tipo === "flujo-efectivo")!;
   return {

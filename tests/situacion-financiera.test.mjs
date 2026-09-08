@@ -32,6 +32,13 @@ test("el lector encuentra Saldo Final aunque el encabezado esté en la celda com
 
 function fila(concepto, saldoFinal) { return { concepto, saldoFinal, esTotal: concepto.startsWith("Total ") }; }
 
+/**
+ * Valores esperados actualizados al modelo corregido: el resultado del período es la VARIACIÓN de
+ * los excedentes (no su saldo) y cada línea aplica el signo de su naturaleza, con las salidas de
+ * efectivo en negativo. El modelo anterior tomaba el saldo acumulado y negaba el total al final,
+ * lo que invertía el signo del resultado y de los pasivos. Verificado contra dos Estados de
+ * Situación Financiera reales consecutivos: el flujo reconstruye el efectivo declarado al centavo.
+ */
 test("el flujo aplica el mapeo oficial y conserva en cero las actividades sin fuente", async () => {
   const { reporteFlujoDesdeSituaciones } = await import(`../lib/reportes.ts?reporte=${Date.now()}`);
   const actual = { periodo: "2026-06", filas: [
@@ -56,31 +63,37 @@ test("el flujo aplica el mapeo oficial y conserva en cero las actividades sin fu
   const reporte = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "mayo de 2026");
   const valores = new Map(reporte.filas.map(item => [item.concepto, item.actual]));
   assert.equal(reporte.fuente, "Estado de Situación Financiera 2026-06");
-  assert.equal(valores.get("Utilidad o pérdida del período"), -800);
-  assert.equal(valores.get("Depreciación"), -70);
-  assert.equal(valores.get("Impuestos pagados por adelantado"), 30);
-  assert.equal(valores.get("Acreedores Comerciales"), 40);
-  assert.equal(valores.get("Impuestos por pagar"), -10);
+  assert.equal(valores.get("Utilidad o pérdida del período"), 0, "los excedentes suman -800 en ambos períodos: el resultado es cero");
+  assert.equal(valores.get("Depreciación"), 70, "la depreciación del período se suma de vuelta");
+  assert.equal(valores.get("Impuestos pagados por adelantado"), -30, "el activo subió 30: consume efectivo");
+  assert.equal(valores.get("Acreedores Comerciales"), 40, "el pasivo subió 40: libera efectivo");
+  assert.equal(valores.get("Impuestos por pagar"), -10, "el pasivo bajó 10: consume efectivo");
   assert.equal(valores.get("Gastos acumulados por pagar"), 20);
   assert.equal(valores.get("Patrimonio"), 100);
-  assert.equal(valores.get("Mobiliario y Equipo de Oficina"), 10);
+  assert.equal(valores.get("Mobiliario y Equipo de Oficina"), -10, "comprar equipo consume efectivo");
+  assert.equal(valores.get("Vehículos"), 5, "vender un vehículo ingresa efectivo");
   assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), 0);
   assert.equal(valores.get("Cuentas por cobrar a empleados"), 0);
-  assert.equal(valores.get("Efectivo neto utilizado en las actividades de operación"), -790);
-  assert.equal(valores.get("Efectivo neto utilizado en las actividades de inversión"), 60);
-  assert.equal(valores.get("Aumento (Disminución) neto en el efectivo"), 730);
+  assert.equal(valores.get("Efectivo neto utilizado en las actividades de operación"), 90);
+  assert.equal(valores.get("Efectivo neto utilizado en las actividades de inversión"), 40);
+  assert.equal(valores.get("Aumento (Disminución) neto en el efectivo"), 230);
   assert.equal(valores.get("Efectivo al 31 de Mayo 2026"), 800);
-  assert.equal(valores.get("Efectivo al 30 de Junio 2026"), 1530);
+  assert.equal(valores.get("Efectivo al 30 de Junio 2026"), 1030);
+  // Estas cifras son un fixture de mapeo, no un balance coherente: la diferencia lo delata.
+  assert.equal(valores.get("Efectivo declarado en el Estado de Situación Financiera"), 900);
+  assert.equal(valores.get("Diferencia contra el efectivo declarado"), 130);
 });
 
-test("al cambiar de año traslada los excedentes del período comparativo con signo inverso", async () => {
+test("el cambio de año no necesita caso especial: el resultado es la variación de los excedentes", async () => {
   const { reporteFlujoDesdeSituaciones } = await import(`../lib/reportes.ts?anual=${Date.now()}`);
   const actual = { periodo: "2026-06", filas: [fila("Excedente Ingresos s/Egresos acumulados", 30), fila("Excedente Ingresos s/Egresos del ejercicio", 20)] };
   const anterior = { periodo: "2025-12", filas: [fila("Excedente Ingresos s/Egresos acumulados", 1000), fila("Excedente Ingresos s/Egresos del ejercicio", 250), fila("Total ACTIVOS CORRIENTES", 5000)] };
   const reporte = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "diciembre de 2025");
   const valores = new Map(reporte.filas.map(item => [item.concepto, item.actual]));
-  assert.equal(valores.get("Utilidad o pérdida del período"), 50);
-  assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), -1250);
+  // 30 + 20 menos 1000 + 250: la variación ya traslada el excedente del año anterior, así que la
+  // línea de arrastre queda en cero en vez de compensar con un caso especial por cambio de año.
+  assert.equal(valores.get("Utilidad o pérdida del período"), -1200);
+  assert.equal(valores.get("Excedente Ingresos/Egresos Acumulados"), 0);
   assert.equal(valores.get("Efectivo al 31 de Diciembre 2025"), 5000);
 });
 
@@ -105,7 +118,7 @@ test("la vista comparativa conserva todas las líneas de ambos estados y calcula
   assert.equal(reporte.filas[1].esTotal, true);
 });
 
-test("los dos excedentes aparecen en la comparación y su suma alimenta la utilidad del flujo", async () => {
+test("los dos excedentes aparecen en la comparación y su variación alimenta la utilidad del flujo", async () => {
   const { reporteFlujoDesdeSituaciones, reporteSituacionComparativaDesdeSituaciones } = await import(`../lib/reportes.ts?excedentes=${Date.now()}`);
   const actual = { periodo: "2026-06", filas: [
     fila("Excedente Ingresos s/Egresos acumulados", -1200),
@@ -126,7 +139,8 @@ test("los dos excedentes aparecen en la comparación y su suma alimenta la utili
   });
 
   const flujo = reporteFlujoDesdeSituaciones(actual, anterior, "junio de 2026", "mayo de 2026");
-  assert.equal(flujo.filas.find(item => item.concepto === "Utilidad o pérdida del período")?.actual, -850);
+  // -200 de variación en acumulados más 150 en el ejercicio: el resultado del período es -50.
+  assert.equal(flujo.filas.find(item => item.concepto === "Utilidad o pérdida del período")?.actual, -50);
 });
 
 test("la exportación Excel conserva la plantilla, las fórmulas y los recursos gráficos", async () => {
@@ -144,7 +158,7 @@ test("la exportación Excel conserva la plantilla, las fórmulas y los recursos 
   assert.equal(sheet.D38.v, 5000);
   assert.equal(sheet.D26.f, "SUM(D9:D25)");
   assert.equal(sheet.D35.f, "SUM(D29:D34)");
-  assert.equal(sheet.D37.f, "SUM(-D26-D35)");
+  assert.equal(sheet.D37.f, "SUM(D26+D35+D28)", "el neto ya no niega los subtotales y suma el patrimonio");
   assert.equal(sheet.D39.f, "SUM(D38+D37)");
   assert.equal(workbook.Workbook.Sheets[1].Hidden, 2);
   const contenido = unzipSync(bytes);

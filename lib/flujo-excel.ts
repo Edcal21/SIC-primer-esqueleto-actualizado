@@ -1,5 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import type { ReporteFinanciero } from "./reportes";
+import { etiquetaFinPeriodo, type ReporteFinanciero } from "./reportes";
 
 const rutaHoja = "xl/worksheets/sheet1.xml";
 
@@ -45,6 +45,10 @@ export function exportarFlujoExcel(reporte: ReporteFinanciero, plantilla: ArrayB
   const valores = new Map(reporte.filas.map(fila => [clave(fila.concepto), fila.actual]));
   const valor = (concepto: string) => valores.get(clave(concepto)) ?? 0;
   const actual = textosPeriodo(reporte.periodoFuente);
+  // Las dos filas de saldo se ubican por su etiqueta y no por posición: el reporte lleva al final
+  // las líneas de control de cuadre, que no forman parte de la plantilla oficial impresa.
+  const etiquetaInicial = etiquetaFinPeriodo(reporte.periodoComparativoFuente);
+  const etiquetaFinal = etiquetaFinPeriodo(reporte.periodoFuente);
 
   hoja = reemplazarCelda(hoja, "B3", celdaTexto(actual.corte), "inlineStr");
   hoja = reemplazarCelda(hoja, "B4", celdaTexto(actual.rango), "inlineStr");
@@ -61,15 +65,18 @@ export function exportarFlujoExcel(reporte: ReporteFinanciero, plantilla: ArrayB
     ["D31", "Vehículos"], ["D32", "Terrenos"], ["D33", "Incremento o Decremento"],
     ["D34", "Excedente Ingresos/Egresos Acumulados"],
     ["D36", "Efectivo neto utilizado en las actividades de financiamiento"],
-    ["D38", reporte.filas.at(-2)?.concepto ?? ""],
+    ["D38", etiquetaInicial],
   ];
   for (const [celda, concepto] of celdas) hoja = reemplazarCelda(hoja, celda, celdaNumero(valor(concepto)));
   hoja = reemplazarCelda(hoja, "D26", celdaNumero(valor("Efectivo neto utilizado en las actividades de operación"), "SUM(D9:D25)"));
   hoja = reemplazarCelda(hoja, "D35", celdaNumero(valor("Efectivo neto utilizado en las actividades de inversión"), "SUM(D29:D34)"));
-  hoja = reemplazarCelda(hoja, "D37", celdaNumero(valor("Aumento (Disminución) neto en el efectivo"), "SUM(-D26-D35)"));
-  hoja = reemplazarCelda(hoja, "D39", celdaNumero(reporte.filas.at(-1)?.actual ?? 0, "SUM(D38+D37)"));
-  hoja = reemplazarCelda(hoja, "B38", celdaTexto(reporte.filas.at(-2)?.concepto ?? ""), "inlineStr");
-  hoja = reemplazarCelda(hoja, "B39", celdaTexto(reporte.filas.at(-1)?.concepto ?? ""), "inlineStr");
+  // D28 (Patrimonio) queda fuera del subtotal de inversión (D29:D34) pero sí afecta el efectivo,
+  // así que entra explícitamente en el neto. La fórmula ya no niega los subtotales: cada línea del
+  // reporte trae su propio signo, con las salidas en negativo.
+  hoja = reemplazarCelda(hoja, "D37", celdaNumero(valor("Aumento (Disminución) neto en el efectivo"), "SUM(D26+D35+D28)"));
+  hoja = reemplazarCelda(hoja, "D39", celdaNumero(valor(etiquetaFinal), "SUM(D38+D37)"));
+  hoja = reemplazarCelda(hoja, "B38", celdaTexto(etiquetaInicial), "inlineStr");
+  hoja = reemplazarCelda(hoja, "B39", celdaTexto(etiquetaFinal), "inlineStr");
   archivos[rutaHoja] = strToU8(hoja);
 
   const rutaLibro = "xl/workbook.xml";
