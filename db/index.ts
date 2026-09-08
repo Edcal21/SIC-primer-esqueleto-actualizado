@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/postgres-js";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 
-export function getDb() {
+export function getDb(): PostgresJsDatabase<typeof schema> {
   const { DATABASE_URL } = env as unknown as { DATABASE_URL?: string };
 
   if (!DATABASE_URL) {

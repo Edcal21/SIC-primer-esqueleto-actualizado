@@ -110,13 +110,30 @@ export const detallesMovimientos = pgTable("detalles_movimientos", {
   cuentaNombre: text("cuenta_nombre").notNull(),
   monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
   orden: integer("orden").notNull().default(1),
+  /** Marca la(s) línea(s) cuyo monto es el importe que realmente afecta la cuenta bancaria de la
+   *  minuta; nunca se asume que es la suma de todos los débitos (una minuta puede tener líneas de
+   *  detalle que no tocan el banco, p. ej. desgloses de gasto o impuesto). */
+  afectaCuentaBancaria: boolean("afecta_cuenta_bancaria").notNull().default(false),
+  /** Moneda del importe bancario original de esta línea. La contabilidad siempre se lleva en NIO
+   *  (columna `monto`); estas columnas conservan el origen en USD cuando corresponde. */
+  moneda: varchar("moneda", { length: 3, enum: ["USD", "NIO"] }).notNull().default("NIO"),
+  montoOriginal: numeric("monto_original", { precision: 18, scale: 2 }).notNull(),
+  /** Tasa NIO por unidad aplicada en el momento del registro. NIO usa tasa 1. Se conserva tal cual
+   *  quedó registrada: cambios posteriores del catálogo de tasas nunca recalculan este valor. */
+  tasaCambio: numeric("tasa_cambio", { precision: 14, scale: 6 }).notNull().default("1"),
 }, (table) => [
   index("idx_detalles_movimientos_movimiento").on(table.movimientoId),
   index("idx_detalles_movimientos_cuenta").on(table.cuentaCodigo),
   index("idx_detalles_movimientos_tipo").on(table.tipo),
+  index("idx_detalles_movimientos_afecta_banco").on(table.movimientoId, table.afectaCuentaBancaria),
   check("ck_detalles_movimientos_tipo", sql`${table.tipo} in ('credito', 'debito')`),
   check("ck_detalles_movimientos_monto", sql`${table.monto} > 0`),
   check("ck_detalles_movimientos_orden", sql`${table.orden} > 0`),
+  check("ck_detalles_movimientos_moneda", sql`${table.moneda} in ('USD', 'NIO')`),
+  check("ck_detalles_movimientos_monto_original", sql`${table.montoOriginal} > 0`),
+  check("ck_detalles_movimientos_tasa_cambio", sql`${table.tasaCambio} > 0`),
+  check("ck_detalles_movimientos_nio_tasa_unitaria", sql`${table.moneda} <> 'NIO' or ${table.tasaCambio} = 1`),
+  check("ck_detalles_movimientos_conversion", sql`${table.monto} = round(${table.montoOriginal} * ${table.tasaCambio}, 2)`),
 ]);
 
 export const cuentasContables = pgTable("cuentas_contables", {
@@ -228,9 +245,18 @@ export const lineasReporteBancario = pgTable("lineas_reporte_bancario", {
   fecha: date("fecha"),
   referencia: varchar("referencia", { length: 120 }),
   descripcion: text("descripcion").notNull(),
+  /** Importes en la moneda original de la cuenta bancaria (columna `moneda`), tal como los trae el
+   *  estado de cuenta. Nunca se convierte todo un estado bancario con una tasa única. */
   debito: numeric("debito", { precision: 18, scale: 2 }).notNull().default("0"),
   credito: numeric("credito", { precision: 18, scale: 2 }).notNull().default("0"),
   saldo: numeric("saldo", { precision: 18, scale: 2 }),
+  moneda: varchar("moneda", { length: 3, enum: ["USD", "NIO"] }).notNull().default("NIO"),
+  /** Tasa NIO por unidad vigente para la fecha de la línea. Nula cuando la línea es de una cuenta
+   *  USD y no hay tasa registrada en el catálogo para esa fecha: queda pendiente de completar y
+   *  bloqueada para enlace o aprobación; nunca se infiere. */
+  tasaCambio: numeric("tasa_cambio", { precision: 14, scale: 6 }),
+  debitoNio: numeric("debito_nio", { precision: 18, scale: 2 }),
+  creditoNio: numeric("credito_nio", { precision: 18, scale: 2 }),
   estadoConciliacion: varchar("estado_conciliacion", { length: 12, enum: ["pendiente", "conciliada", "descartada"] }).notNull().default("pendiente"),
   movimientoId: uuid("movimiento_id").references(() => movimientosCuentas.id, { onDelete: "set null" }),
   conciliadoPor: varchar("conciliado_por", { length: 40 }).references(() => usuarios.id),
@@ -243,6 +269,61 @@ export const lineasReporteBancario = pgTable("lineas_reporte_bancario", {
   check("ck_lineas_reporte_bancario_montos", sql`${table.debito} >= 0 and ${table.credito} >= 0`),
   check("ck_lineas_reporte_bancario_estado", sql`${table.estadoConciliacion} in ('pendiente', 'conciliada', 'descartada')`),
   check("ck_lineas_reporte_bancario_conciliada", sql`${table.estadoConciliacion} <> 'conciliada' or ${table.movimientoId} is not null`),
+  check("ck_lineas_reporte_bancario_moneda", sql`${table.moneda} in ('USD', 'NIO')`),
+  check("ck_lineas_reporte_bancario_tasa_cambio", sql`${table.tasaCambio} is null or ${table.tasaCambio} > 0`),
+  check("ck_lineas_reporte_bancario_nio_tasa_unitaria", sql`${table.moneda} <> 'NIO' or ${table.tasaCambio} = 1`),
+  check(
+    "ck_lineas_reporte_bancario_conversion",
+    sql`${table.tasaCambio} is null or (${table.debitoNio} = round(${table.debito} * ${table.tasaCambio}, 2) and ${table.creditoNio} = round(${table.credito} * ${table.tasaCambio}, 2))`,
+  ),
+]);
+
+/**
+ * Control de cierre contable. Un período existe en esta tabla solo cuando alguien lo administró:
+ * la ausencia de fila significa "abierto" (es el estado de todo lo registrado antes de este
+ * módulo), de modo que la migración no cierra retroactivamente nada. "reabierto" no es un estado
+ * propio: al reabrir, el período vuelve a `abierto` y conserva quién y por qué lo reabrió.
+ */
+export const periodosContables = pgTable("periodos_contables", {
+  periodo: varchar("periodo", { length: 7 }).primaryKey().notNull(),
+  estado: varchar("estado", { length: 8, enum: ["abierto", "revision", "cerrado"] }).notNull().default("abierto"),
+  fechaApertura: timestamp("fecha_apertura", { withTimezone: true }).notNull().defaultNow(),
+  fechaCierre: timestamp("fecha_cierre", { withTimezone: true }),
+  cerradoPor: varchar("cerrado_por", { length: 40 }).references(() => usuarios.id),
+  cerradoPorNombre: text("cerrado_por_nombre"),
+  reabiertoPor: varchar("reabierto_por", { length: 40 }).references(() => usuarios.id),
+  reabiertoPorNombre: text("reabierto_por_nombre"),
+  reabiertoEn: timestamp("reabierto_en", { withTimezone: true }),
+  motivoReapertura: text("motivo_reapertura"),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_periodos_contables_estado").on(table.estado),
+  check("ck_periodos_contables_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("ck_periodos_contables_estado", sql`${table.estado} in ('abierto', 'revision', 'cerrado')`),
+  // Un período cerrado siempre sabe cuándo y quién lo cerró; uno no cerrado no arrastra esos datos.
+  check("ck_periodos_contables_cierre", sql`(${table.estado} = 'cerrado') = (${table.fechaCierre} is not null and ${table.cerradoPor} is not null)`),
+  // Si se registró una reapertura, quedan su autor, su fecha y su motivo: nunca uno sin los otros.
+  check("ck_periodos_contables_reapertura", sql`(${table.reabiertoPor} is null) = (${table.motivoReapertura} is null) and (${table.reabiertoPor} is null) = (${table.reabiertoEn} is null)`),
+]);
+
+export const tasasCambio = pgTable("tasas_cambio", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fecha: date("fecha").notNull(),
+  /** Único destino soportado hoy: USD hacia NIO. NIO usa tasa 1 de forma implícita y no se cataloga. */
+  moneda: varchar("moneda", { length: 3, enum: ["USD"] }).notNull().default("USD"),
+  tasa: numeric("tasa", { precision: 14, scale: 6 }).notNull(),
+  fuente: text("fuente").notNull(),
+  creadoPor: varchar("creado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+  actualizadoPor: varchar("actualizado_por", { length: 40 }).references(() => usuarios.id),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("ux_tasas_cambio_fecha_moneda").on(table.fecha, table.moneda),
+  index("idx_tasas_cambio_moneda").on(table.moneda),
+  check("ck_tasas_cambio_moneda", sql`${table.moneda} = 'USD'`),
+  check("ck_tasas_cambio_positiva", sql`${table.tasa} > 0`),
+  check("ck_tasas_cambio_fuente", sql`length(trim(${table.fuente})) > 0`),
 ]);
 
 export const conciliacionesBancarias = pgTable("conciliaciones_bancarias", {

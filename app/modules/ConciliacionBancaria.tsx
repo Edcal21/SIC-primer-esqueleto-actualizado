@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { dinero, type Conciliacion, type LineaBanco, type LineaConciliacion, type MovimientoConciliable, type ReporteDisponible, type RequestConfirmation } from "../shared";
+import { formatearMoneda, type Conciliacion, type LineaBanco, type LineaConciliacion, type MovimientoConciliable, type ReporteDisponible, type RequestConfirmation } from "../shared";
 
 const estadoLineaClass = (estado: LineaBanco["estadoConciliacion"]) => estado === "conciliada" ? "status done" : estado === "descartada" ? "status danger" : "status pending";
 const estadoConciliacionClass = (estado: Conciliacion["estado"]) => estado === "aprobada" ? "status done" : estado === "rechazada" ? "status danger" : "status pending";
 const netoLinea = (linea: LineaBanco) => Number(linea.credito) - Number(linea.debito);
+const pendienteDeTasa = (linea: LineaBanco) => linea.moneda === "USD" && linea.tasaCambio === null;
 
 export default function ConciliacionBancaria({ canReconcile, canApprove, notify, requestConfirmation }: { canReconcile: boolean; canApprove: boolean; notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [conciliaciones, setConciliaciones] = useState<Conciliacion[]>([]);
@@ -121,11 +122,11 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
       <div className="panelHead"><div><h2>Conciliaciones registradas</h2><p>{loading ? "Cargando desde PostgreSQL" : `${conciliaciones.length} conciliaciones`}</p></div><button onClick={cargarLista}>Actualizar</button></div>
       <div className="tableWrap"><table><thead><tr><th>PERÍODO</th><th>CUENTA</th><th>ESTADO DE CUENTA</th><th>NETO BANCO</th><th>CONCILIADO</th><th>PENDIENTE</th><th>LÍNEAS</th><th>ESTADO</th><th/></tr></thead><tbody>{conciliaciones.map(item => <tr key={item.id}>
         <td><b>{item.periodo}</b><small>{new Date(item.creadoEn).toLocaleDateString("es-NI")}</small></td>
-        <td>{item.cuentaBancariaNombre ?? item.cuentaBancariaNumero}</td>
+        <td>{item.cuentaBancariaNombre ?? item.cuentaBancariaNumero} <small>{item.cuentaBancariaMoneda ?? "NIO"}</small></td>
         <td>{item.reporteNombre ?? "-"}</td>
-        <td className="amount">{dinero.format(Number(item.totalBanco))}</td>
-        <td className="amount">{dinero.format(Number(item.totalConciliado))}</td>
-        <td className={Math.abs(Number(item.totalPendiente)) < 0.01 ? "amount positive" : "amount negative"}>{dinero.format(Number(item.totalPendiente))}</td>
+        <td className="amount">{formatearMoneda(Number(item.totalBanco), item.cuentaBancariaMoneda ?? "NIO")}</td>
+        <td className="amount">{formatearMoneda(Number(item.totalConciliado), item.cuentaBancariaMoneda ?? "NIO")}</td>
+        <td className={Math.abs(Number(item.totalPendiente)) < 0.01 ? "amount positive" : "amount negative"}>{formatearMoneda(Number(item.totalPendiente), item.cuentaBancariaMoneda ?? "NIO")}</td>
         <td>{item.lineasConciliadas} de {item.lineasConciliadas + item.lineasPendientes}</td>
         <td><span className={estadoConciliacionClass(item.estado)}>{item.estado}</span></td>
         <td><button className="linkButton" type="button" onClick={() => cargarDetalle(item.id)}>{seleccionada === item.id ? "Actualizar" : "Abrir"}</button></td>
@@ -133,15 +134,18 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
       {!loading && !conciliaciones.length ? <div className="emptyReport">Todavía no hay conciliaciones. Procese un estado de cuenta y genere la primera conciliación.</div> : null}
     </section>
     {conciliacion ? <>
-      <section className="metrics compactMetrics">
-        <article className="metric featured"><p>Neto del banco</p><strong>{dinero.format(Number(conciliacion.totalBanco))}</strong><span className={estadoConciliacionClass(conciliacion.estado)}>{conciliacion.estado}</span></article>
-        <article className="metric"><p>Conciliado con libros</p><strong>{dinero.format(Number(conciliacion.totalConciliado))}</strong><small>{conciliacion.lineasConciliadas} líneas enlazadas</small></article>
-        <article className="metric"><p>Diferencia pendiente</p><strong className={Math.abs(Number(conciliacion.totalPendiente)) < 0.01 ? "positive" : "negative"}>{dinero.format(Number(conciliacion.totalPendiente))}</strong><small>{conciliacion.lineasPendientes} líneas sin resolver</small></article>
-        <article className="metric"><p>Minutas sin respaldo bancario</p><strong>{conciliacion.movimientosSinConciliar}</strong><small>Registradas en libros y ausentes del estado de cuenta</small></article>
-      </section>
+      {(() => {
+        const moneda = conciliacion.cuentaBancariaMoneda ?? "NIO";
+        return <section className="metrics compactMetrics">
+          <article className="metric featured"><p>Neto del banco ({moneda})</p><strong>{formatearMoneda(Number(conciliacion.totalBanco), moneda)}</strong><span className={estadoConciliacionClass(conciliacion.estado)}>{conciliacion.estado}</span></article>
+          <article className="metric"><p>Conciliado con libros ({moneda})</p><strong>{formatearMoneda(Number(conciliacion.totalConciliado), moneda)}</strong><small>{conciliacion.lineasConciliadas} líneas enlazadas</small></article>
+          <article className="metric"><p>Diferencia pendiente ({moneda})</p><strong className={Math.abs(Number(conciliacion.totalPendiente)) < 0.01 ? "positive" : "negative"}>{formatearMoneda(Number(conciliacion.totalPendiente), moneda)}</strong><small>{conciliacion.lineasPendientes} líneas sin resolver</small></article>
+          <article className="metric"><p>Minutas sin respaldo bancario</p><strong>{conciliacion.movimientosSinConciliar}</strong><small>Registradas en libros y ausentes del estado de cuenta</small></article>
+        </section>;
+      })()}
       <section className="panel tablePanel">
         <div className="panelHead">
-          <div><h2>Detalle de la conciliación</h2><p>{conciliacion.reporteNombre} · cuenta {conciliacion.cuentaBancariaNombre ?? conciliacion.cuentaBancariaNumero} · período {conciliacion.periodo}</p></div>
+          <div><h2>Detalle de la conciliación</h2><p>{conciliacion.reporteNombre} · cuenta {conciliacion.cuentaBancariaNombre ?? conciliacion.cuentaBancariaNumero} ({conciliacion.cuentaBancariaMoneda ?? "NIO"}) · período {conciliacion.periodo}</p></div>
           {canApprove && conciliacion.estado === "borrador" ? <div className="reviewActions"><label>Observaciones<textarea value={observaciones} onChange={event => setObservaciones(event.target.value)} rows={2} placeholder="Obligatorias para rechazar"/></label><div className="reportActions"><button className="secondary" type="button" onClick={() => revisar("rechazar")}>Rechazar</button><button className="primary" type="button" onClick={() => revisar("aprobar")} disabled={conciliacion.lineasPendientes > 0}>Aprobar conciliación</button></div></div> : null}
         </div>
         {conciliacion.estado !== "borrador" ? <div className="readOnlyBanner">Conciliación {conciliacion.estado} por {conciliacion.revisadoPorNombre ?? "revisor no registrado"}{conciliacion.revisadoEn ? ` el ${new Date(conciliacion.revisadoEn).toLocaleString("es-NI")}` : ""}.{conciliacion.observaciones ? ` Observaciones: ${conciliacion.observaciones}` : ""}</div> : null}
@@ -150,15 +154,17 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
           <td>{linea.numeroLinea}</td>
           <td>{linea.fecha ?? "Sin fecha"}</td>
           <td><b>{linea.descripcion}</b>{linea.referencia ? <small>Ref. {linea.referencia}</small> : null}</td>
-          <td className={netoLinea(linea) < 0 ? "amount negative" : "amount positive"}>{dinero.format(netoLinea(linea))}</td>
-          <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span></td>
+          <td className={netoLinea(linea) < 0 ? "amount negative" : "amount positive"}>{formatearMoneda(netoLinea(linea), linea.moneda)}</td>
+          <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span>{pendienteDeTasa(linea) ? <small className="status pending">Pendiente de completar tasa USD</small> : null}</td>
           <td>{linea.movimiento
-            ? <div className="matchCell"><b>{linea.movimiento.concepto}</b><small>{linea.movimiento.fecha} · {dinero.format(linea.movimiento.monto)}</small>{editable ? <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Deshacer enlace</button> : null}</div>
+            ? <div className="matchCell"><b>{linea.movimiento.concepto}</b><small>{linea.movimiento.fecha} · {formatearMoneda(linea.movimiento.montoOriginal, linea.movimiento.moneda)}{!linea.movimiento.completo ? " · minuta histórica sin línea bancaria marcada" : ""}</small>{editable ? <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Deshacer enlace</button> : null}</div>
             : editable
-              ? <div className="matchCell">
+              ? pendienteDeTasa(linea)
+                ? <small>Registre la tasa de cambio de esta fecha en Configuración → Tasas de cambio para poder enlazarla.</small>
+                : <div className="matchCell">
                   <select value={enlaces[linea.id] ?? ""} onChange={event => setEnlaces(current => ({ ...current, [linea.id]: event.target.value }))} disabled={!disponiblesMovimientos.length}>
                     <option value="">{disponiblesMovimientos.length ? "Seleccione un movimiento" : "Sin minutas disponibles en el período"}</option>
-                    {disponiblesMovimientos.map(movimiento => <option key={movimiento.id} value={movimiento.id}>{movimiento.fecha} · {dinero.format(movimiento.monto)} · {movimiento.concepto}{Math.abs(movimiento.monto - Math.abs(netoLinea(linea))) < 0.01 ? " · monto coincide" : ""}</option>)}
+                    {disponiblesMovimientos.map(movimiento => <option key={movimiento.id} value={movimiento.id}>{movimiento.fecha} · {formatearMoneda(movimiento.montoOriginal, movimiento.moneda)} · {movimiento.concepto}{Math.abs(movimiento.montoOriginal - Math.abs(netoLinea(linea))) < 0.01 ? " · monto coincide" : ""}</option>)}
                   </select>
                   <div className="matchActions">
                     <button className="linkButton" type="button" onClick={() => accionLinea("conciliar", linea)} disabled={saving || !enlaces[linea.id]}>Enlazar</button>
@@ -174,9 +180,9 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
         <div className="panelHead"><div><h2>Minutas sin respaldo bancario</h2><p>Movimientos registrados en libros sobre esta cuenta que no aparecen enlazados</p></div></div>
         <div className="tableWrap"><table><thead><tr><th>FECHA</th><th>CONCEPTO</th><th>REFERENCIA</th><th>MONTO</th></tr></thead><tbody>{disponiblesMovimientos.map(movimiento => <tr key={movimiento.id}>
           <td>{movimiento.fecha}</td>
-          <td>{movimiento.concepto}</td>
+          <td>{movimiento.concepto}{!movimiento.completo ? <small> · histórica sin línea bancaria marcada</small> : null}</td>
           <td>{movimiento.referencia ?? "Sin referencia"}</td>
-          <td className="amount">{dinero.format(movimiento.monto)}</td>
+          <td className="amount">{formatearMoneda(movimiento.montoOriginal, movimiento.moneda)}</td>
         </tr>)}</tbody></table></div>
       </section> : null}
     </> : null}

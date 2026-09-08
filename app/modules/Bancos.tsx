@@ -1,7 +1,9 @@
 "use client";
 import { type FormEvent, useEffect, useState } from "react";
-import { dinero, statusClass, type CuentaBancaria, type LineaBanco, type Reporte, type RequestConfirmation } from "../shared";
+import { dinero, formatearMoneda, statusClass, type CuentaBancaria, type LineaBanco, type Reporte, type RequestConfirmation } from "../shared";
 import CuentasBancariasPanel from "./CuentasBancariasPanel";
+
+const estadoLineaClass = (estado: LineaBanco["estadoConciliacion"]) => estado === "conciliada" ? "status done" : estado === "descartada" ? "status danger" : "status pending";
 
 export default function Bancos({ canUpload, canManageAccounts, notify, requestConfirmation }: { canUpload: boolean; canManageAccounts: boolean; notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [reportes, setReportes] = useState<Reporte[]>([]);
@@ -113,10 +115,10 @@ export default function Bancos({ canUpload, canManageAccounts, notify, requestCo
         <td>{linea.fecha ?? "Sin fecha"}</td>
         <td>{linea.referencia ?? "Sin referencia"}</td>
         <td>{linea.descripcion}</td>
-        <td className="amount">{Number(linea.debito) ? dinero.format(Number(linea.debito)) : "-"}</td>
-        <td className="amount">{Number(linea.credito) ? dinero.format(Number(linea.credito)) : "-"}</td>
-        <td className="amount">{linea.saldo === null ? "-" : dinero.format(Number(linea.saldo))}</td>
-        <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span></td>
+        <td className="amount">{Number(linea.debito) ? formatearMoneda(Number(linea.debito), linea.moneda) : "-"}{linea.moneda === "USD" && linea.debitoNio !== null ? <small>≈ {dinero.format(Number(linea.debitoNio))}</small> : null}</td>
+        <td className="amount">{Number(linea.credito) ? formatearMoneda(Number(linea.credito), linea.moneda) : "-"}{linea.moneda === "USD" && linea.creditoNio !== null ? <small>≈ {dinero.format(Number(linea.creditoNio))}</small> : null}</td>
+        <td className="amount">{linea.saldo === null ? "-" : formatearMoneda(Number(linea.saldo), linea.moneda)}</td>
+        <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span>{linea.moneda === "USD" && linea.tasaCambio === null ? <small className="status pending">Pendiente de tasa</small> : null}</td>
       </tr>)}</tbody></table></div> : null}
     </section> : null}
     {canManageAccounts ? <CuentasBancariasPanel cuentas={cuentas} onChanged={cargarCuentas} notify={notify} requestConfirmation={requestConfirmation}/> : null}

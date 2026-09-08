@@ -1,9 +1,11 @@
+import { conBloqueoConciliacion, esConflictoContable } from "../../../lib/conciliacion-lock";
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { conciliacionesBancarias, cuentasBancarias, reportesBancarios } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { autoConciliar, periodoDesdeFecha, recalcularConciliacion } from "../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
+import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../lib/periodos";
 
 type ConciliacionPayload = { reporteId?: string };
 
@@ -19,6 +21,7 @@ export async function GET(request: Request) {
       reporteId: conciliacionesBancarias.reporteId,
       cuentaBancariaNumero: conciliacionesBancarias.cuentaBancariaNumero,
       cuentaBancariaNombre: cuentasBancarias.nombre,
+      cuentaBancariaMoneda: cuentasBancarias.moneda,
       periodo: conciliacionesBancarias.periodo,
       estado: conciliacionesBancarias.estado,
       totalBanco: conciliacionesBancarias.totalBanco,
@@ -74,37 +77,42 @@ export async function POST(request: Request) {
   if (!reporteId) return jsonError("Seleccione el reporte bancario a conciliar", 400);
 
   const db = getDb();
-  const [reporte] = await db.select().from(reportesBancarios).where(eq(reportesBancarios.id, reporteId)).limit(1);
-  if (!reporte) return jsonError("Reporte bancario no encontrado", 404);
-  if (reporte.estado !== "procesado") return jsonError("Solo se pueden conciliar reportes bancarios procesados", 400);
-  if (!reporte.cuentaBancariaNumero) return jsonError("El reporte no tiene cuenta bancaria asociada; vuelva a cargarlo indicando la cuenta", 400);
-
-  const [existente] = await db.select({ id: conciliacionesBancarias.id }).from(conciliacionesBancarias).where(eq(conciliacionesBancarias.reporteId, reporteId)).limit(1);
-  if (existente) return jsonError("Este reporte bancario ya tiene una conciliación generada", 409);
-
-  const periodo = periodoDesdeFecha(reporte.periodoFin ?? reporte.periodoInicio ?? reporte.fecha);
-
   try {
-    const [conciliacion] = await db.insert(conciliacionesBancarias).values({
-      reporteId: reporte.id,
-      cuentaBancariaNumero: reporte.cuentaBancariaNumero,
-      periodo,
-      creadoPor: user.id,
-    }).returning();
+    return await conBloqueoConciliacion(db, async db => {
+      const [reporte] = await db.select().from(reportesBancarios).where(eq(reportesBancarios.id, reporteId)).limit(1);
+      if (!reporte) return jsonError("Reporte bancario no encontrado", 404);
+      if (reporte.estado !== "procesado") return jsonError("Solo se pueden conciliar reportes bancarios procesados", 400);
+      if (!reporte.cuentaBancariaNumero) return jsonError("El reporte no tiene cuenta bancaria asociada; vuelva a cargarlo indicando la cuenta", 400);
 
-    const automaticas = await autoConciliar(db, reporte.id, reporte.cuentaBancariaNumero, user.id);
-    const actualizada = await recalcularConciliacion(db, conciliacion.id);
-    await registrarAuditoria(db, {
-      user,
-      modulo: "Conciliación",
-      accion: "Generó conciliación bancaria",
-      entidad: "conciliaciones_bancarias",
-      entidadId: conciliacion.id,
-      detalle: `${reporte.nombre} · período ${periodo} · ${automaticas} líneas enlazadas automáticamente`,
+      const [existente] = await db.select({ id: conciliacionesBancarias.id }).from(conciliacionesBancarias).where(eq(conciliacionesBancarias.reporteId, reporteId)).limit(1);
+      if (existente) return jsonError("Este reporte bancario ya tiene una conciliación generada", 409);
+
+      const periodo = periodoDesdeFecha(reporte.periodoFin ?? reporte.periodoInicio ?? reporte.fecha);
+      const periodoCerrado = await primerPeriodoCerrado(db, [periodo]);
+      if (periodoCerrado) return jsonError(mensajePeriodoCerrado(periodoCerrado), 409);
+
+      const [conciliacion] = await db.insert(conciliacionesBancarias).values({
+        reporteId: reporte.id,
+        cuentaBancariaNumero: reporte.cuentaBancariaNumero,
+        periodo,
+        creadoPor: user.id,
+      }).returning();
+
+      const automaticas = await autoConciliar(db, reporte.id, reporte.cuentaBancariaNumero, user.id);
+      const actualizada = await recalcularConciliacion(db, conciliacion.id);
+      await registrarAuditoria(db, {
+        user,
+        modulo: "Conciliación",
+        accion: "Generó conciliación bancaria",
+        entidad: "conciliaciones_bancarias",
+        entidadId: conciliacion.id,
+        detalle: `${reporte.nombre} · período ${periodo} · ${automaticas} líneas enlazadas automáticamente`,
+      });
+
+      return Response.json({ conciliacion: actualizada ?? conciliacion, enlazadasAutomaticamente: automaticas }, { status: 201, headers: { "Cache-Control": "no-store" } });
     });
-
-    return Response.json({ conciliacion: actualizada ?? conciliacion, enlazadasAutomaticamente: automaticas }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (esConflictoContable(error)) return jsonError("Conflicto contable: actualice la pantalla y vuelva a intentar", 409);
     console.error("Reconciliation creation failed", error);
     return jsonError("No se pudo generar la conciliación bancaria", 500);
   }
