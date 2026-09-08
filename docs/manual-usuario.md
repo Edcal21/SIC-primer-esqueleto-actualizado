@@ -51,7 +51,7 @@
 
 **ANEXOS**
 - A. Matriz completa de permisos
-- B. Formatos de archivo aceptados
+- B. Formatos de archivo aceptados — B.1 Estado de cuenta bancario · B.2 Balanza de comprobación · B.3 Catálogo contable · B.4 Auxiliar contable · B.5 Estado de Situación Financiera
 - C. Glosario
 
 ---
@@ -65,13 +65,14 @@ El **SIC (Sistema de Información Contable)** es la herramienta institucional pa
 
 El sistema se opera desde un navegador web. No requiere instalación en la computadora del usuario.
 
-### 1.1 Los cuatro procesos que cubre
+### 1.1 Los cinco procesos que cubre
 
 | Proceso | Qué hace | Quién lo ejecuta |
 |---|---|---|
 | **Registro de minutas** | Captura de asientos contables por partida doble | Operador bancario |
 | **Conciliación bancaria** | Cruce del estado de cuenta del banco contra las minutas registradas | Operador bancario genera; Administrador aprueba |
-| **Importación de balanza** | Carga de la balanza de comprobación mensual | Contador general |
+| **Importaciones contables** | Carga de catálogo, auxiliar, balanza y estado de situación financiera | Contador general (catálogo: Administrador) |
+| **Reportes financieros** | Generación de los cinco estados financieros y exportación del flujo de efectivo con formato oficial | Contador general |
 | **Cierre de período** | Bloqueo de un mes para impedir cambios posteriores | Administrador |
 
 ### 1.2 Principios de operación
@@ -99,8 +100,12 @@ Tres reglas gobiernan todo el sistema. Conviene entenderlas antes de usarlo:
 - Carga y procesamiento de estados de cuenta bancarios en formato CSV o Excel.
 - Generación de conciliaciones bancarias con enlace automático y manual de líneas.
 - Aprobación o rechazo de conciliaciones, con observaciones.
-- Importación de la balanza de comprobación mensual desde Excel.
-- Generación y descarga de reportes financieros.
+- Importación de la **balanza de comprobación** mensual desde CSV o Excel.
+- Importación del **catálogo contable** desde CSV o Excel.
+- Importación del **auxiliar contable**, que genera minutas cuadradas de forma masiva.
+- Importación del **Estado de Situación Financiera** por período, que es la fuente del estado de flujo de efectivo.
+- Generación y descarga de los cinco reportes financieros.
+- Exportación del **estado de flujo de efectivo a Excel con el formato oficial** de la institución.
 - Cierre y reapertura de períodos contables, con bloqueo de escrituras.
 - Administración de usuarios, roles y permisos.
 - Bitácora de auditoría consultable.
@@ -114,6 +119,7 @@ Se documenta explícitamente para evitar expectativas incorrectas:
 - **No emite facturas ni comprobantes fiscales.**
 - **No lleva control de inventarios ni de activos fijos.**
 - **No presupuesta ni controla ejecución presupuestaria.**
+- **No calcula el estado de flujo de efectivo a partir de las minutas.** Lo deriva de los Estados de Situación Financiera importados, comparando el campo *Saldo Final* entre períodos. Si ese estado no se importa, el reporte no tiene fuente de datos.
 - **No se conecta automáticamente con el banco.** Los estados de cuenta se descargan del portal bancario y se cargan manualmente al sistema.
 - **No convierte un estado de cuenta completo con una sola tasa.** Cada línea resuelve su propia tasa según su fecha.
 - **No infiere datos faltantes.** Si falta la tasa de cambio de una fecha, el sistema bloquea la operación en lugar de estimarla.
@@ -201,6 +207,16 @@ El diseño separa deliberadamente **quien prepara** de **quien aprueba**:
 - El **auditor general** ve todo lo relevante y **no puede modificar nada**.
 
 > **Nota para la institución:** si una misma persona debe cubrir dos funciones, el Administrador puede ajustar los permisos del rol desde **Usuarios → Roles**. Hacerlo reduce el control interno; debe quedar autorizado por escrito.
+
+> ### ⚠️ Excepción a la separación de funciones: el auxiliar contable
+>
+> El importador de **auxiliar contable** crea minutas reales en el sistema: inserta asientos con sus líneas de débito y crédito, exactamente igual que la captura manual.
+>
+> Pero exige el permiso `importaciones:administrar`, no `movimientos:escribir`. En la práctica: **el contador general puede crear minutas de forma masiva por importación, aunque no pueda registrar ni una sola a mano.**
+>
+> El importador sí respeta las demás reglas — valida partida doble, rechaza duplicados y no escribe en períodos cerrados — pero la separación entre *quien captura* y *quien reporta* no aplica por esta vía.
+>
+> **La institución debe decidir si esto es aceptable.** Si no lo es, la corrección es exigir también `movimientos:escribir` en ese importador. Queda documentado como comportamiento de la versión entregada.
 
 ### 4.4 "No veo un módulo en el menú"
 
@@ -812,9 +828,12 @@ Los capítulos de esta parte describen procesos que **involucran a más de una p
 | 7 | Revisar y aprobar cada conciliación | Administrador | Conciliación | ☐ |
 | 8 | Importar la balanza de comprobación del mes | Contador general | Importaciones | ☐ |
 | 9 | Verificar que la balanza no quede "Con diferencias" | Contador general | Importaciones | ☐ |
-| 10 | Generar y archivar los reportes financieros | Contador general | Reportes | ☐ |
-| 11 | Marcar el período **En revisión** | Administrador | Cierre contable | ☐ |
-| 12 | **Cerrar el período** | Administrador | Cierre contable | ☐ |
+| 10 | Importar el Estado de Situación Financiera del mes | Contador general | Importaciones | ☐ |
+| 11 | Generar y archivar los reportes financieros | Contador general | Reportes | ☐ |
+| 12 | Marcar el período **En revisión** | Administrador | Cierre contable | ☐ |
+| 13 | **Cerrar el período** | Administrador | Cierre contable | ☐ |
+
+> **Los importadores de catálogo y auxiliar no forman parte del cierre mensual.** Se usan cuando hay que cargar o actualizar estructura contable, o migrar asientos en bloque — no todos los meses. Si los usa, hágalo **antes** del paso 8.
 
 ### 10.2 Desarrollo de los pasos
 
@@ -853,17 +872,40 @@ El sistema **no estima** tasas. Si falta la tasa de un día, ninguna minuta en d
 
 Una conciliación **Rechazada** vuelve al operador bancario para corrección.
 
-#### Pasos 8 a 10 — Balanza y reportes (Contador general)
+#### Pasos 8 y 9 — Balanza de comprobación (Contador general)
 
-1. En **Importaciones**, cargue el Excel de la balanza de comprobación del mes, indicando el **período (AAAA-MM)**.
-   - Columnas esperadas: **Cuenta, Descripción, Saldo Inicial, Débitos, Créditos, Saldo Final**.
-2. Verifique el estado del resultado:
-   - **Procesado** — la balanza cuadra.
-   - **Con diferencias** — débitos y créditos no cuadran. **No continúe.** Corrija en el origen y vuelva a importar.
-   - **Error** — el archivo no se pudo leer. Revise el **Anexo B**.
-3. En **Reportes**, genere y descargue los estados financieros del período. Archívelos según la política documental de la institución.
+1. Menú → **Importaciones** → panel **Importar balanza de comprobación**.
+2. Indique el **período (AAAA-MM)** y seleccione el archivo.
+3. Antes de importar, revise la línea **Campos detectados**: debe mostrar Cuenta, Descripción, Saldo Inicial, Débitos, Créditos y Saldo Final. Si falta alguno, el archivo tiene los encabezados mal (Anexo B).
+4. Presione **Importar balanza** y verifique el estado en el **Historial de balanzas**:
 
-#### Pasos 11 y 12 — Cierre (Administrador)
+| Estado | Significado | Qué hacer |
+|---|---|---|
+| **Procesado** | La balanza cuadra | Continuar al paso 10 |
+| **Con diferencias** | Débitos y créditos no cuadran | **No continúe.** Corrija en el origen y vuelva a importar |
+| **Error** | El archivo no se pudo leer | Revise formato y encabezados (Anexo B) |
+
+> **Una balanza "con diferencias" impide cerrar el período.** El sistema lo bloquea en el paso 13 (ver 10.1). No lo deje para el final.
+
+> **La importación de balanza puede crear cuentas contables** que no existan en el catálogo. Revise el catálogo después de importar si el archivo trae cuentas nuevas.
+
+#### Paso 10 — Estado de Situación Financiera (Contador general)
+
+1. Menú → **Importaciones** → panel **Estado de Situación Financiera**.
+2. Indique el **período (AAAA-MM)** y seleccione el archivo.
+3. Verifique que **Campos detectados** muestre *Descripción* y *Saldo Final*.
+4. Presione **Importar estado financiero**.
+
+> **Este paso no es opcional si la institución emite estado de flujo de efectivo.** Es su única fuente: el reporte compara el *Saldo Final* entre períodos. Sin el estado del mes importado, el flujo de efectivo sale vacío o incompleto.
+
+#### Paso 11 — Reportes financieros (Contador general)
+
+1. Menú → **Reportes**.
+2. Genere los estados del período: flujo de efectivo, balanza anual, cambio en el patrimonio, situación comparativo y resultado comparativo.
+3. Descargue y archive según la política documental de la institución.
+4. El **flujo de efectivo** se exporta a Excel con el **formato oficial** de la institución, a partir de la plantilla incluida en el sistema.
+
+#### Pasos 12 y 13 — Cierre (Administrador)
 
 1. En **Cierre contable**, ubique el período. Si no está en la lista, ábralo con **Abrir período** (formato AAAA-MM).
 2. Presione **Marcar en revisión**. Esto señala que el mes está en proceso de cierre; todavía admite cambios.
@@ -958,6 +1000,9 @@ El sistema confirma: *"Minuta anulada y registrada en auditoría"*. El asiento q
 | **Tasa de cambio equivocada** | **Configuración → Tasas de cambio**, editar. **No recalcula** movimientos ya registrados | Administrador |
 | **Conciliación mal armada** | El Administrador la **rechaza** con observaciones; el operador la corrige | Administrador / Operador |
 | **Balanza mal importada** | Vuelva a importar el período. La importación anterior queda en el historial | Contador general |
+| **Estado de situación financiera mal importado** | Vuelva a importar el período. Regenere después el flujo de efectivo | Contador general |
+| **Catálogo mal importado** | Corrija cuenta por cuenta en **Catálogo contable**, o vuelva a importar el archivo corregido | Administrador |
+| **Auxiliar mal importado** | Cada movimiento creado es una minuta: se **anulan una por una** desde Minutas, con motivo. No hay deshacer masivo | Operador bancario |
 | **Cuenta contable incorrecta** | **Catálogo contable**. Las cuentas no se borran: se marcan **inactivas** | Administrador |
 
 ---
@@ -1003,7 +1048,7 @@ El sistema informa: *"Período AAAA-MM reabierto; el motivo quedó registrado"*.
 2. Si afectó cuentas bancarias, regenere y vuelva a aprobar la conciliación correspondiente.
 3. Si afectó saldos, vuelva a importar la balanza del período.
 4. Regenere los reportes financieros del período: **los emitidos antes de la reapertura quedan desactualizados** y deben sustituirse.
-5. Cierre nuevamente el período (capítulo 10, pasos 11 y 12).
+5. Cierre nuevamente el período (capítulo 10, pasos 12 y 13).
 
 > **Control interno recomendado:** que cada reapertura genere un memorando interno firmado por la jefatura contable, archivado junto con los reportes sustituidos.
 
@@ -1082,8 +1127,90 @@ El sistema **reconoce automáticamente** los encabezados más usados por la banc
 |---|---|
 | **Formatos** | `.csv`, `.xlsx`, `.xls` |
 | **Tamaño máximo** | 10 MB |
-| **Período** | Formato AAAA-MM |
+| **Período** | Formato AAAA-MM, obligatorio |
 | **Columnas** | Cuenta, Descripción, Saldo Inicial, Débitos, Créditos, Saldo Final |
+
+### B.3 Catálogo contable
+
+| Aspecto | Requisito |
+|---|---|
+| **Formatos** | `.csv`, `.xlsx`, `.xls` · máximo 10 MB |
+| **Período** | No aplica |
+| **Obligatorias** | Código **y** Descripción. Sin ambas: *"No se encontraron encabezados de catálogo: Código/Cuenta y Descripción/Nombre"* |
+
+| Dato | Nombres reconocidos |
+|---|---|
+| **Código** | código, codigo, cuenta, cuenta código, código cuenta |
+| **Descripción** | descripción, nombre, nombre cuenta, cuenta nombre |
+| **Cuenta padre** | cuenta padre, padre, código padre |
+| **Naturaleza** | naturaleza, tipo saldo, saldo normal |
+| **Movimiento** | movimiento, cuenta movimiento, es cuenta movimiento, detalle, afectable |
+| **Flujo** | flujo, clasificación flujo, estado flujo, tipo flujo |
+| **Estado** | estado, estatus |
+
+**Valores que el sistema interpreta**
+
+| Columna | Se lee como sí / deudora / activa | Se lee como no / acreedora / inactiva |
+|---|---|---|
+| Movimiento | `si` `s` `true` `1` `x` `detalle` `movimiento` `afectable` | `no` `n` `false` `0` `mayor` `titulo` `grupo` |
+| Naturaleza | `deudora` `deudor` `debito` `debe` | `acreedora` `acreedor` `credito` `haber` |
+| Estado | (cualquier otro valor) | `inactiva` `inactivo` `baja` `0` |
+| Flujo | `operación` `inversión` `financiamiento` | `no aplica` `n/a` `na` |
+
+> **El código debe tener exactamente 8 caracteres.** Es una restricción de la base de datos: un archivo con códigos de otra longitud será rechazado.
+
+### B.4 Auxiliar contable
+
+| Aspecto | Requisito |
+|---|---|
+| **Formatos** | `.csv`, `.xlsx`, `.xls` · máximo 10 MB |
+| **Período** | No aplica; lo determina la fecha de cada movimiento |
+| **Obligatorias** | Fecha **y** Cuenta. Sin ambas: *"No se encontraron encabezados de auxiliar: Fecha y Cuenta"* |
+
+| Dato | Nombres reconocidos |
+|---|---|
+| **Fecha** | fecha, fecha movimiento, fecha contable, fecha documento |
+| **Iglesia** | iglesia, código iglesia, sucursal, centro, centro costo |
+| **Cuenta bancaria** | cuenta bancaria, banco, cuenta banco, número cuenta bancaria |
+| **Referencia** | referencia, documento, número documento, comprobante, minuta |
+| **Concepto** | concepto, descripción, detalle, glosa |
+| **Cuenta contable** | cuenta, código cuenta, cuenta código |
+| **Nombre de cuenta** | nombre cuenta, cuenta nombre, descripción cuenta |
+| **Tipo** | tipo, naturaleza movimiento, débito crédito |
+| **Débito** | débito, debe, cargo, egreso |
+| **Crédito** | crédito, haber, abono |
+| **Monto** | monto, importe, valor |
+| **Afecta banco** | afecta banco, afecta cuenta bancaria, banco afectado, línea banco |
+| **Monto original (USD)** | monto original, importe original, valor original, monto usd, importe usd |
+
+> ### ⚠️ Este importador crea minutas reales
+>
+> No es una carga informativa: inserta asientos contables con sus líneas, igual que la captura manual. Aplica las mismas reglas:
+>
+> - valida partida doble — *"El auxiliar contiene movimientos que no cumplen partida doble"*;
+> - rechaza duplicados — *"El auxiliar contiene un movimiento duplicado por fecha, iglesia, cuenta bancaria y referencia"*;
+> - **no escribe en períodos cerrados**.
+>
+> **No hay deshacer masivo.** Si importa un archivo equivocado, cada minuta creada debe anularse una por una desde el módulo Minutas. Revise el archivo antes de importarlo.
+
+### B.5 Estado de Situación Financiera
+
+| Aspecto | Requisito |
+|---|---|
+| **Formatos** | `.csv`, `.xlsx`, `.xls` · máximo 10 MB |
+| **Período** | Formato AAAA-MM, obligatorio |
+| **Encabezados** | Una columna **Descripción** (o *Concepto*) y una columna **Saldo Final** con valores numéricos |
+
+**Mensajes de error**
+
+| Mensaje | Causa |
+|---|---|
+| *"No se encontraron los encabezados Descripción y Saldo Final del Estado de Situación Financiera"* | Faltan las columnas obligatorias |
+| *"No se encontraron valores numéricos en la columna Saldo Final"* | La columna existe pero trae texto, o los números vienen como texto |
+| *"El archivo no contiene líneas con Saldo Final"* | El archivo tiene encabezados pero ninguna fila con dato |
+| *"El archivo no contiene hojas para procesar"* | El Excel está vacío o dañado |
+
+> **Es la fuente exclusiva del estado de flujo de efectivo.** El reporte compara el *Saldo Final* de este estado entre períodos. Importe uno por cada mes que deba aparecer en el flujo.
 
 ---
 
@@ -1095,6 +1222,10 @@ El sistema **reconoce automáticamente** los encabezados más usados por la banc
 | **Partida doble** | Regla contable que el sistema valida: el total de débitos debe ser igual al total de créditos |
 | **Línea bancaria** | La línea de la minuta que representa el movimiento real de dinero en la cuenta bancaria. **No** es necesariamente la suma de todos los débitos |
 | **Balanza de comprobación** | Reporte mensual con saldos iniciales, movimientos y saldos finales por cuenta |
+| **Auxiliar contable** | Archivo de movimientos que el sistema convierte en minutas cuadradas al importarlo |
+| **Estado de Situación Financiera** | Archivo de saldos finales por período. Es la fuente del estado de flujo de efectivo |
+| **Cuenta de movimiento** | Cuenta que admite asientos directos. Solo estas aparecen al registrar una minuta |
+| **Campos detectados** | Lo que el importador reconoció del archivo. Si falta un campo esperado, los encabezados están mal |
 | **Conciliación bancaria** | Cruce entre el estado de cuenta del banco y las minutas registradas en libros |
 | **Línea pendiente** | Movimiento del estado de cuenta que aún no se ha enlazado con una minuta |
 | **Pendiente de tasa** | Línea en dólares cuya tasa de cambio no está registrada en el catálogo. No se puede enlazar hasta registrarla |
