@@ -33,10 +33,10 @@
 5. Cómo leer la interfaz
 
 **PARTE II — GUÍA POR ROL**
-6. Operador bancario
-7. Contador general
-8. Administrador
-9. Auditor general
+6. Operador bancario — 6.1 Registrar una minuta · 6.2 Consultar y anular minutas · 6.3 Cargar el estado de cuenta · 6.4 Generar y trabajar una conciliación
+7. Contador general — 7.1 Importaciones contables · 7.2 Reportes financieros
+8. Administrador — 8.1 Usuarios y roles · 8.2 Catálogo contable · 8.3 Iglesias · 8.4 Cuentas bancarias · 8.5 Tasas de cambio · 8.6 Aprobar o rechazar conciliaciones · 8.7 Cierre contable · 8.8 Configuración institucional · 8.9 Auditoría
+9. Auditor general — 9.1 Bitácora de auditoría · 9.2 Consulta y descarga de reportes
 
 **PARTE III — PROCEDIMIENTOS COMPLETOS**
 10. Cierre mensual paso a paso
@@ -132,6 +132,8 @@ El sistema asume que la institución cumple lo siguiente:
 ## 3. Ingreso y cierre de sesión
 
 ### 3.1 Ingresar
+
+![Pantalla de acceso al sistema](img/00-login.png)
 
 1. Abra el navegador y digite la dirección del sistema proporcionada por la institución.
 2. Escriba su **usuario** y su **contraseña**.
@@ -260,31 +262,527 @@ El listado completo de mensajes, causas y acciones está en el **capítulo 14**.
 
 # PARTE II — GUÍA POR ROL
 
-> _Sección en elaboración. Cada capítulo desarrolla, con capturas de pantalla, las tareas del rol siguiendo el mismo formato: **Para qué sirve → Cómo se hace (pasos) → Qué valida el sistema → Errores frecuentes**._
+Cada capítulo es autosuficiente: lea solamente el de su rol.
+
+Todas las capturas se tomaron con datos de prueba. Los importes, iglesias y números de cuenta que aparecen no corresponden a información real de la institución.
+
+---
 
 ## 6. Operador bancario
-- 6.1 Registrar una minuta
-- 6.2 Consultar y anular minutas
-- 6.3 Cargar el estado de cuenta del banco
-- 6.4 Generar y trabajar una conciliación
+
+**Usuario de ejemplo:** `banco` · **Rol:** Operador bancario
+
+Su menú tiene seis opciones:
+
+![Menú del operador bancario](img/opbancario-resumen.png)
+
+| Grupo | Opciones |
+|---|---|
+| Operativa | Resumen · Registrar movimiento · Minutas · Bancos · Conciliación |
+| Reportes | Reportes |
+
+Es el rol que **captura** información. No aprueba conciliaciones ni cierra períodos: eso corresponde al Administrador.
+
+---
+
+### 6.1 Registrar una minuta
+
+**Para qué sirve.** Registrar un asiento contable por partida doble: de dónde salió el dinero y a dónde entró.
+
+![Pantalla Registrar movimiento](img/opbancario-registrar-movimiento.png)
+
+**Cómo se hace**
+
+1. Menú → **Registrar movimiento**.
+2. Complete la cabecera:
+
+| Campo | Obligatorio | Notas |
+|---|:--:|---|
+| **Fecha** | Sí | Determina el período contable y la tasa de cambio que se aplica |
+| **Cuenta bancaria** | Sí | Muestra `nombre · número · moneda`. La moneda define si se pide importe en dólares |
+| **Iglesia** | Sí | Se elige del catálogo de iglesias activas |
+| **Referencia** | No | Número de minuta o referencia bancaria. Máximo 120 caracteres |
+| **Concepto** | Sí | Descripción del movimiento |
+
+3. Complete las líneas del asiento. Por defecto aparecen dos: una de débito y una de crédito.
+   - **Tipo:** Débito o Crédito.
+   - **Cuenta contable:** se busca por código. Solo admite cuentas marcadas como *cuenta de movimiento* en el catálogo.
+   - **Monto.**
+   - **Línea bancaria:** casilla que marca **cuál de las líneas mueve la cuenta bancaria**.
+4. Use **Agregar línea** si el asiento necesita más de dos.
+5. Presione el botón de registro y confirme en la ventana **"Confirmar asiento contable"**.
+
+El sistema responde: *"Movimiento registrado y auditado correctamente"*.
+
+> ### La casilla "Línea bancaria": el concepto que más se malinterpreta
+>
+> El sistema **no asume** que el monto que afecta al banco es la suma de los débitos. Usted se lo indica marcando la casilla.
+>
+> **Por qué importa:** si registra un depósito de C$ 10,000 que se reparte en diezmos (C$ 7,000) y ofrendas (C$ 3,000), el banco vio **una** transacción de C$ 10,000. La línea marcada es la del banco (C$ 10,000), no las dos de ingresos.
+>
+> De ese monto marcado depende que la conciliación encuentre la coincidencia. Si lo marca mal, la línea del estado de cuenta nunca va a enlazar.
+
+**Qué valida el sistema**
+
+| Validación | Mensaje |
+|---|---|
+| Al menos una línea marcada como bancaria | *"Marque al menos una línea como la que afecta la cuenta bancaria de la minuta"* |
+| Todas las líneas bancarias en la misma dirección | *"Las líneas que afectan la cuenta bancaria deben ir todas en la misma dirección (todas débito o todas crédito). Si la minuta representa una entrada y una salida, regístrelas por separado."* |
+| Mínimo dos líneas | *"Debe agregar al menos dos detalles para cumplir partida doble"* |
+| Débitos = créditos | *"La minuta debe cuadrar: débitos y créditos tienen que ser iguales"* |
+| Cuentas válidas | *"Hay líneas con un código que no pertenece al catálogo de cuentas de movimiento"* |
+| Campos completos | *"Complete cuenta y monto en todas las líneas"* |
+| Tasa registrada (solo cuentas USD) | *"Falta registrar la tasa de cambio USD → NIO para el AAAA-MM-DD. Regístrela en Configuración → Tasas de cambio antes de continuar."* |
+| Período abierto | *"El período AAAA-MM está cerrado. Un administrador debe reabrirlo desde Cierre contable antes de registrar minutas con esa fecha."* |
+| No duplicada | *"Ya existe una minuta registrada con la misma fecha, iglesia, cuenta bancaria y referencia"* |
+
+**Errores frecuentes**
+
+| Situación | Qué hacer |
+|---|---|
+| No aparece el campo de importe en dólares | La cuenta bancaria seleccionada es en córdobas. Verifique que eligió la cuenta correcta |
+| Falta la tasa del día | Solicite al Administrador que la registre. Usted no tiene ese permiso |
+| El asiento no cuadra por centavos | Revise el redondeo en el origen. El sistema exige igualdad exacta |
+| El período está cerrado | Solicite la reapertura al Administrador, con justificación (ver capítulo 13) |
+
+---
+
+### 6.2 Consultar y anular minutas
+
+**Para qué sirve.** Ver los asientos registrados y dejar sin efecto los que estén equivocados.
+
+![Pantalla Minutas registradas](img/opbancario-minutas.png)
+
+**Cómo se hace**
+
+1. Menú → **Minutas**.
+2. Filtre con los botones **Todas / Vigentes / Anuladas**.
+3. Para anular, presione **Anular** en la fila.
+4. Revise el detalle contable que muestra el sistema y confirme que es el asiento correcto.
+5. Escriba el **motivo** (mínimo **10 caracteres**).
+6. Presione **Confirmar anulación**.
+
+El procedimiento completo, con las restricciones y qué hacer después, está en el **capítulo 12**.
+
+> **En el SIC no se edita ni se borra un asiento.** Se anula y se registra uno nuevo. El detalle contable del asiento anulado sigue siendo consultable de forma permanente.
+
+---
+
+### 6.3 Cargar el estado de cuenta del banco
+
+**Para qué sirve.** Subir al sistema el archivo que descarga del portal bancario, para poder conciliarlo.
+
+![Pantalla Reportes bancarios](img/opbancario-bancos.png)
+
+**Cómo se hace**
+
+1. Descargue del portal del banco el estado de cuenta del mes.
+2. Menú → **Bancos** → panel **Subir estado de cuenta**.
+3. Seleccione la **cuenta bancaria** que corresponde al archivo.
+4. Seleccione el archivo.
+5. Presione **Procesar reporte**.
+
+El sistema responde: *"Estado bancario procesado: N movimientos guardados"*.
+
+6. Presione **Ver detalle** para revisar las líneas guardadas antes de conciliar.
+
+**Requisitos del archivo**
+
+| Aspecto | Requisito |
+|---|---|
+| Formatos | `.csv`, `.xlsx`, `.xls` |
+| Tamaño máximo | 10 MB |
+| Encabezados | Una columna de descripción/concepto **y** al menos una de débito, crédito o monto |
+
+Los nombres de columna que el sistema reconoce automáticamente están en el **Anexo B**.
+
+**Errores frecuentes**
+
+| Mensaje | Qué hacer |
+|---|---|
+| *"Seleccione la cuenta bancaria del estado de cuenta"* | Elija la cuenta antes del archivo |
+| *"Formato no permitido; use CSV o Excel"* | Convierta el archivo. Un PDF del banco no sirve |
+| *"El archivo supera el límite de 10 MB"* | Divida el estado de cuenta por rangos de fecha |
+| *"No se reconoció el encabezado del estado bancario…"* | Renombre las columnas según el Anexo B |
+| *"El archivo tiene encabezados válidos pero ninguna fila de movimientos"* | El rango descargado está vacío. Verifique las fechas en el portal del banco |
+
+> **Cargar dos veces el mismo archivo no borra el anterior.** Ambos quedan en el historial. Antes de conciliar, verifique que está trabajando sobre el estado de cuenta correcto.
+
+---
+
+### 6.4 Generar y trabajar una conciliación
+
+**Para qué sirve.** Cruzar cada línea del estado de cuenta contra las minutas registradas, y dejar explicada toda diferencia.
+
+![Pantalla Conciliación bancaria](img/opbancario-conciliacion.png)
+
+**Cómo se hace**
+
+1. Menú → **Conciliación** → panel **Generar conciliación**.
+2. Elija el estado de cuenta ya procesado.
+3. Presione **Generar conciliación**.
+
+El sistema enlaza automáticamente las líneas que coinciden con **una única** minuta por monto, fecha, moneda y dirección, e informa: *"Conciliación generada: N líneas enlazadas automáticamente"*.
+
+> **Por qué no enlaza todo automáticamente.** Si dos minutas coinciden con la misma línea, el sistema **no elige por usted**: deja la línea pendiente para que decida una persona. Es deliberado — una conciliación equivocada es peor que una pendiente.
+
+4. Presione **Abrir** para ver el detalle y trabaje las líneas **Pendiente**:
+
+| Acción | Cuándo se usa |
+|---|---|
+| **Enlazar** | La línea corresponde a una minuta registrada. Selecciónela y presione *Enlazar* |
+| **Descartar** | La línea no corresponde a un asiento propio (comisión bancaria, cargo no registrado). Debe registrarse después la minuta correspondiente |
+| **Reabrir** | Devuelve una línea descartada al estado pendiente |
+| **Deshacer enlace** | Rompe un enlace incorrecto |
+
+5. Revise el panel **Minutas sin respaldo bancario**: asientos registrados en libros que no aparecen en el estado de cuenta (cheques en tránsito, depósitos no acreditados, o errores de registro). Cada uno debe tener explicación.
+
+6. Cuando **Pendiente** llegue a cero — o cada pendiente tenga justificación documentada — avise al Administrador para la aprobación.
+
+> **Usted no puede aprobar la conciliación que preparó.** Es separación de funciones, no una limitación técnica.
+
+**Columnas del listado**
+
+| Columna | Qué muestra |
+|---|---|
+| **Neto banco** | Total del movimiento según el estado de cuenta |
+| **Conciliado** | Suma de las líneas ya enlazadas |
+| **Pendiente** | Lo que falta explicar. **Es la cifra que importa** |
+| **Líneas** | Conciliadas / pendientes |
+| **Estado** | Borrador · Aprobada · Rechazada |
+
+Para cuentas en dólares, vea el **capítulo 11**.
+
+---
 
 ## 7. Contador general
-- 7.1 Importar la balanza de comprobación
-- 7.2 Generar y descargar reportes financieros
+
+**Usuario de ejemplo:** `contador` · **Rol:** Contador general
+
+Su menú tiene tres opciones: **Resumen**, **Importaciones** y **Reportes**.
+
+> **El contador general no ve Bancos ni Conciliación.** Si necesita consultar una conciliación, debe solicitarla al Administrador o al Auditor. Está documentado como comportamiento actual del sistema; si la institución necesita otra cosa, el Administrador puede ajustar el rol (ver 4.3).
+
+---
+
+### 7.1 Importaciones contables
+
+**Para qué sirve.** Cargar al sistema la información contable que se produce fuera de él.
+
+![Pantalla Importaciones contables](img/contador-importaciones.png)
+
+La pantalla reúne **cuatro importadores**:
+
+| Importador | Qué carga | Campos esperados |
+|---|---|---|
+| **Catálogo contable** | Cuentas contables | Código/Cuenta y Descripción/Nombre. Opcionales: Nivel, Padre, Naturaleza, Flujo, Movimiento, Estado |
+| **Auxiliar contable** | Egresos o movimientos, como minutas cuadradas | Fecha, Iglesia, Cuenta bancaria, Referencia, Concepto… |
+| **Estado de situación financiera** | Saldos finales por período. Es la **fuente exclusiva del flujo de efectivo** | Descripción, Saldo Final |
+| **Balanza de comprobación** | Balanza mensual | Cuenta, Descripción, Saldo Inicial, Débitos, Créditos, Saldo Final |
+
+Cada panel muestra los **campos reconocidos** del archivo antes de importar. Revíselos: si un campo esperado no aparece ahí, el archivo tiene los encabezados mal.
+
+**Cómo se hace**
+
+1. Menú → **Importaciones**.
+2. Ubique el panel del tipo de archivo que va a cargar.
+3. Indique el **período** (los paneles que lo piden).
+4. Seleccione el archivo y presione el botón de importación del panel.
+5. Verifique el estado en el historial de la parte inferior.
+
+**Estados posibles**
+
+| Estado | Significado | Qué hacer |
+|---|---|---|
+| **Procesado** | El archivo cuadra | Continuar |
+| **Con diferencias** | Débitos y créditos no cuadran | **No continúe.** Corrija en el origen y vuelva a importar |
+| **Error** | El archivo no se pudo leer | Revise formato y encabezados (Anexo B) |
+
+> ### ⚠️ Importar catálogo contable: limitación conocida
+>
+> El panel **Importar catálogo contable** aparece en su pantalla, pero **no funciona con su usuario**. Al intentarlo, el sistema responde:
+>
+> *"No tiene permiso para importar catálogo contable"* (HTTP 403)
+>
+> Ese importador exige el permiso `catalogo:administrar`, que corresponde al **Administrador**.
+>
+> **Solicite la importación del catálogo al Administrador.** No es una falla de su archivo ni de su sesión.
+>
+> _(Comportamiento verificado en la versión entregada. Ver nota técnica en el capítulo 14.)_
+
+---
+
+### 7.2 Reportes financieros
+
+**Para qué sirve.** Generar y descargar los estados financieros del período.
+
+![Centro de reportes](img/contador-reportes.png)
+
+**Cómo se hace**
+
+1. Menú → **Reportes**.
+2. Elija el tipo de reporte:
+
+| Reporte | Contenido |
+|---|---|
+| Estado de flujo de efectivo | Operación, inversión y financiamiento |
+| Balanza de comprobación anual | Saldos deudores y acreedores |
+| Estado de cambio en el patrimonio | Variaciones del patrimonio institucional |
+| Estado de situación comparativo | Activos, pasivos y patrimonio |
+| Estado de resultado comparativo | Ingresos, gastos y resultado neto |
+
+3. Seleccione período y granularidad.
+4. Genere y descargue.
+
+El **flujo de efectivo** se exporta a Excel con el **formato oficial** de la institución, a partir de la plantilla incluida en el sistema.
+
+> **El flujo de efectivo se alimenta del Estado de Situación Financiera importado**, comparando el campo *Saldo Final* entre períodos. Si no importó ese estado, el reporte no tiene fuente de datos.
+
+> **El contador general es, junto con el auditor, uno de los dos roles con permiso de descarga** (`reportes:descargar`). El operador bancario puede ver los reportes pero no descargarlos.
+
+---
 
 ## 8. Administrador
-- 8.1 Usuarios y roles
-- 8.2 Catálogo contable
-- 8.3 Iglesias
-- 8.4 Cuentas bancarias
-- 8.5 Tasas de cambio
-- 8.6 Aprobar o rechazar conciliaciones
-- 8.7 Cierre contable
-- 8.8 Configuración institucional
+
+**Usuario de ejemplo:** `administrador` · **Rol:** Administrador
+
+Su menú tiene nueve opciones:
+
+| Grupo | Opciones |
+|---|---|
+| Operativa | Resumen · Bancos · Conciliación |
+| Gestión | Usuarios · Catálogo contable · Iglesias · Auditoría · Cierre contable · Configuración |
+
+> **El Administrador no registra minutas ni importa balanza.** No tiene `movimientos:escribir` ni `importaciones:administrar`. Es separación de funciones: administra, aprueba y cierra; no captura.
+
+---
+
+### 8.1 Usuarios y roles
+
+![Pantalla Usuarios y roles](img/admin-usuarios.png)
+
+Menú → **Usuarios**. Permite crear usuarios, asignarles rol, activarlos o desactivarlos, restablecer contraseñas y ajustar qué permisos tiene cada rol.
+
+> **Antes del primer uso real, cambie las contraseñas de los cuatro usuarios sembrados** (`administrador`, `contador`, `banco`, `auditor`). Las contraseñas iniciales están documentadas públicamente en el repositorio del sistema.
+
+> **Desactive en lugar de borrar.** Un usuario desactivado no puede ingresar, pero su historial en la bitácora de auditoría permanece atribuible.
+
+---
+
+### 8.2 Catálogo contable
+
+![Pantalla Catálogo contable](img/admin-catalogo-contable.png)
+
+Menú → **Catálogo contable**. Administra las cuentas contables.
+
+| Atributo | Qué define |
+|---|---|
+| **Código** | Identificador de la cuenta. **Exactamente 8 caracteres** |
+| **Descripción** | Nombre de la cuenta |
+| **Nivel** | Del 1 al 5. Define la jerarquía |
+| **Cuenta padre** | Cuenta de la que depende |
+| **Naturaleza** | Deudora o acreedora |
+| **Cuenta de movimiento** | Si admite asientos directos. **Solo estas aparecen al registrar una minuta** |
+| **Clasificación de flujo** | Operación, inversión, financiamiento o no aplica. Alimenta el estado de flujo de efectivo |
+| **Estado** | Activa o inactiva |
+
+> **Las cuentas no se borran, se marcan inactivas.** Una cuenta con asientos históricos debe seguir existiendo para que esos asientos sigan siendo legibles.
+
+> **"Cuenta de movimiento" es la distinción crítica.** Las cuentas de agrupación (ACTIVO, PASIVO) no deben marcarse como de movimiento: existen para totalizar, no para recibir asientos.
+
+También puede cargar el catálogo masivamente desde **Importaciones → Importar catálogo contable** (ver la nota en 7.1: es el Administrador quien tiene ese permiso).
+
+---
+
+### 8.3 Iglesias
+
+![Pantalla Iglesias](img/admin-iglesias.png)
+
+Menú → **Iglesias**. Administra el catálogo de iglesias con su código y nombre. Solo las **activas** aparecen al registrar una minuta.
+
+Al igual que las cuentas contables, se desactivan en lugar de borrarse.
+
+---
+
+### 8.4 Cuentas bancarias
+
+![Panel de cuentas bancarias dentro de Bancos](img/admin-bancos.png)
+
+Menú → **Bancos**. El panel de administración de cuentas bancarias aparece **dentro de la pantalla de Bancos**, y solo para su rol.
+
+| Campo | Notas |
+|---|---|
+| **Número de cuenta** | Identificador de la cuenta |
+| **Nombre** | Nombre descriptivo |
+| **Moneda** | **NIO** o **USD** |
+| **Estado** | Activa o inactiva |
+
+> ### ⚠️ La moneda no se puede cambiar después
+>
+> Una vez que la cuenta tiene minutas o estados de cuenta cargados, el sistema **bloquea** el cambio de moneda. Cambiarla reinterpretaría todos los importes históricos.
+>
+> **Defina la moneda correctamente al crear la cuenta.** Si se equivocó, cree una cuenta nueva y desactive la incorrecta.
+
+> **Usted administra las cuentas pero no carga estados de cuenta** (no tiene `banco:cargar`). Esa es tarea del operador bancario.
+
+---
+
+### 8.5 Tasas de cambio USD → NIO
+
+![Panel de tasas de cambio en Configuración](img/admin-configuracion.png)
+
+Menú → **Configuración** → panel **Tasas de cambio USD → NIO**.
+
+**Cómo se hace**
+
+1. **Fecha** de vigencia de la tasa.
+2. **Tasa (NIO por USD)** — hasta 6 decimales.
+3. **Fuente** — de dónde salió (Banco Central de Nicaragua, banco comercial, etc.).
+4. Presione **Registrar tasa**.
+
+> ### Dos reglas que debe conocer
+>
+> **1. Corregir una tasa aquí NUNCA recalcula minutas ya guardadas.** Cada minuta conserva la tasa vigente al momento de registrarse. Es intencional: la historia contable no cambia retroactivamente.
+>
+> **2. Sin tasa registrada, nadie puede capturar movimientos en dólares de esa fecha.** El sistema bloquea en lugar de estimar.
+
+**Registre las tasas del mes por adelantado o el mismo día.** Es la causa más común de bloqueo del operador bancario.
+
+La **moneda funcional** del sistema es NIO y no se edita desde la interfaz: es una regla contable, no una preferencia.
+
+---
+
+### 8.6 Aprobar o rechazar conciliaciones
+
+![Pantalla Conciliación bancaria](img/admin-conciliacion.png)
+
+Menú → **Conciliación** → **Abrir** la conciliación en estado *Borrador*.
+
+**Qué revisar antes de aprobar**
+
+1. **Pendiente** debe ser cero, o cada pendiente debe tener justificación.
+2. **Minutas sin respaldo bancario**: cada una debe tener explicación razonable.
+3. Que la conciliación corresponda al **estado de cuenta y período correctos**.
+
+**Cómo se hace**
+
+1. Escriba **Observaciones** si corresponde.
+2. Presione **Aprobar** o **Rechazar**.
+3. Confirme en la ventana.
+
+> **Las observaciones son obligatorias para rechazar.** Sin ellas: *"Indique el motivo del rechazo en las observaciones"*. Escriba qué debe corregirse — el operador solo tiene ese texto para saber qué hacer.
+
+Una conciliación **Rechazada** vuelve al operador bancario para corrección.
+
+---
+
+### 8.7 Cierre contable
+
+![Pantalla Cierre contable](img/admin-cierre-contable.png)
+
+Menú → **Cierre contable**. Controla qué períodos admiten cambios.
+
+**Los tres estados**
+
+| Estado | Qué significa | Admite cambios |
+|---|---|:--:|
+| **Abierto** | Operación normal | Sí |
+| **En revisión** | En proceso de cierre | Sí |
+| **Cerrado** | Bloqueado | **No** |
+
+> **Un período que nunca se abrió aquí se comporta como abierto.** Solo el estado *cerrado* bloquea. Registrar un período le permite marcarlo en revisión y cerrarlo.
+
+**Abrir un período:** panel **Abrir período**, formato **AAAA-MM**. El sistema sugiere los períodos con actividad registrada que aún no se administran.
+
+**Cerrar:** presione **Cerrar período** y confirme. Si la columna Estado muestra *"N pendiente(s) para cerrar"*, el botón queda deshabilitado hasta resolver los impedimentos.
+
+**El sistema impide cerrar cuando hay:**
+- conciliaciones en **borrador** o **rechazada** con fechas del período;
+- balanzas del período **con diferencias**.
+
+**Qué bloquea un período cerrado:** registro y anulación de minutas, importación de balanza, carga de estados de cuenta, generación y aprobación de conciliaciones, y registro de tasas de cambio — siempre que la fecha caiga dentro del período.
+
+**Reabrir:** exige un **motivo de al menos 15 caracteres**. El procedimiento completo está en el **capítulo 13**.
+
+---
+
+### 8.8 Configuración institucional
+
+![Pantalla Configuración institucional](img/admin-configuracion.png)
+
+Menú → **Configuración** → panel **Identidad del sistema**.
+
+| Campo | Dónde se ve |
+|---|---|
+| **Nombre institucional** | Barra lateral, pantalla de acceso y reportes |
+| **Nombre del sistema** | Barra lateral y título |
+| **Descripción del sistema** | Encabezado |
+| **Ruta del logo institucional** | Ruta interna dentro de `public/` |
+| **Moneda funcional** | **NIO**, fija. No editable |
+
+Los cambios se guardan en la base de datos y quedan registrados en auditoría. La vista previa muestra cómo queda antes de guardar.
+
+---
+
+### 8.9 Auditoría
+
+Ver el capítulo 9.1: la pantalla es la misma que consulta el Auditor general.
+
+---
 
 ## 9. Auditor general
-- 9.1 Consultar la bitácora de auditoría
-- 9.2 Consultar y descargar reportes
+
+**Usuario de ejemplo:** `auditor` · **Rol:** Auditor general
+
+Su menú tiene cinco opciones: **Resumen**, **Bancos**, **Conciliación**, **Reportes** y **Auditoría**.
+
+> **El auditor no modifica nada.** Puede ver bancos, conciliaciones y reportes, descargarlos, y consultar la bitácora completa. No registra, no aprueba, no cierra. Es acceso de solo lectura por diseño.
+
+---
+
+### 9.1 Bitácora de auditoría
+
+**Para qué sirve.** Consultar el registro permanente de quién hizo qué, cuándo y con qué resultado.
+
+![Pantalla Auditoría general](img/auditor-auditoria.png)
+
+Menú → **Auditoría**.
+
+| Columna | Qué muestra |
+|---|---|
+| **Fecha** | Fecha y hora del evento |
+| **Usuario** | Quién lo ejecutó |
+| **Acción** | Qué operación se intentó |
+| **Resultado** | Si tuvo éxito o fue rechazada |
+| **Detalle** | Información adicional del evento |
+
+**Qué queda registrado**
+
+- Ingresos y cierres de sesión
+- Registro y anulación de minutas, con el motivo de la anulación
+- Carga de estados de cuenta e importaciones
+- Generación, aprobación y rechazo de conciliaciones, con observaciones
+- Apertura, revisión, cierre y **reapertura** de períodos, con el motivo
+- Registro y corrección de tasas de cambio
+- Cambios de usuarios, roles, catálogo, iglesias y configuración
+
+> **Los intentos rechazados también quedan registrados.** Un usuario que intenta una operación sin permiso deja rastro. Para una auditoría, los intentos fallidos suelen ser tan informativos como los exitosos.
+
+**Qué revisar en una auditoría de rutina**
+
+1. **Reaperturas de período** — deben ser excepcionales y tener motivo sustantivo.
+2. **Anulaciones de minutas** — un volumen alto sugiere un problema de proceso, no de captura.
+3. **Cambios de rol o permisos** — deben corresponder a autorizaciones escritas.
+4. **Correcciones de tasas de cambio** — verificar contra la fuente declarada.
+5. **Conciliaciones aprobadas con pendientes distintos de cero** — revisar las observaciones.
+
+---
+
+### 9.2 Consulta y descarga de reportes
+
+![Centro de reportes](img/auditor-reportes.png)
+
+Menú → **Reportes**. Mismos cinco reportes descritos en 7.2. El auditor tiene permiso de **descarga** (`reportes:descargar`).
 
 ---
 ---
