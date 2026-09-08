@@ -180,6 +180,22 @@ test("auxiliary ledger import creates accounting movements", async () => {
   assert.match(importacionesUi, /\/api\/importaciones\/auxiliar/, "la UI debe llamar la API dedicada de auxiliar");
 });
 
+test("reports expose minute filtering by church and date range", async () => {
+  const [route, component, reportsModule] = await Promise.all([
+    readFile(new URL("../app/api/reportes/minutas/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ReporteMinutas.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/Reportes.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(route, /puede\(user, "reportes:ver"\)/, "el reporte debe exigir permiso para ver reportes");
+  assert.match(route, /gte\(movimientosCuentas\.fecha, desde\)/, "la consulta debe filtrar desde la fecha inicial");
+  assert.match(route, /lte\(movimientosCuentas\.fecha, hasta\)/, "la consulta debe filtrar hasta la fecha final");
+  assert.match(route, /eq\(movimientosCuentas\.iglesiaCodigo, iglesiaCodigo\)/, "la consulta debe filtrar por iglesia");
+  assert.match(component, /Todas las iglesias/, "la UI debe permitir consultar todas las iglesias");
+  assert.match(component, /Aplicar filtros/, "la UI debe permitir aplicar el rango seleccionado");
+  assert.match(reportsModule, /ReporteMinutas/, "el reporte de minutas debe estar integrado al centro de reportes");
+});
+
 test("church catalog is administrable from API and UI", async () => {
   const [page, iglesiasUi, auth, iglesias, iglesiaPatch, migration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

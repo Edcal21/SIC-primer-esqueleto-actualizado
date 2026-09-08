@@ -2,7 +2,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import type { getDb } from "../db";
 import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, lineasSituacionFinanciera, reportesCatalogo } from "../db/schema";
 
-export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
+export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; esTotal?: boolean; esEncabezado?: boolean };
 export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string };
@@ -17,6 +17,7 @@ export const catalogoReportes: { tipo: TipoReporte; titulo: string; descripcion:
   { tipo:"cambio-patrimonio", titulo:"Estado de cambio en el patrimonio", descripcion:"Movimientos que explican la variación del patrimonio institucional." },
   { tipo:"situacion-comparativa", titulo:"Estado de situación comparativo", descripcion:"Activos, pasivos y patrimonio comparados entre dos períodos." },
   { tipo:"resultado-comparativo", titulo:"Estado de resultado comparativo", descripcion:"Ingresos, gastos y resultado neto comparados entre dos períodos." },
+  { tipo:"minutas", titulo:"Reporte de minutas", descripcion:"Minutas ingresadas filtradas por iglesia y período de tiempo." },
 ];
 
 export function esTipoReporte(value:string): value is TipoReporte { return catalogoReportes.some(item=>item.tipo===value); }
@@ -29,9 +30,12 @@ export async function obtenerCatalogoReportes(db: Db) {
       descripcion: reportesCatalogo.descripcion,
       icono: reportesCatalogo.icono,
     }).from(reportesCatalogo).where(eq(reportesCatalogo.estado, "activo")).orderBy(asc(reportesCatalogo.orden));
-    return rows.length ? rows.map(row => ({ ...row, tipo: row.tipo as TipoReporte })) : catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry"][index] ?? "reports" }));
+    if (!rows.length) return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry", "reports"][index] ?? "reports" }));
+    const disponibles = rows.map(row => ({ ...row, tipo: row.tipo as TipoReporte }));
+    if (!disponibles.some(item => item.tipo === "minutas")) disponibles.push({ ...catalogoReportes.find(item => item.tipo === "minutas")!, icono: "reports" });
+    return disponibles;
   } catch {
-    return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry"][index] ?? "reports" }));
+    return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry", "reports"][index] ?? "reports" }));
   }
 }
 
@@ -204,6 +208,7 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
 }
 
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
+  if (tipo === "minutas") throw new Error("El reporte de minutas utiliza filtros de iglesia y rango de fechas");
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
   if (tipo === "flujo-efectivo" || tipo === "situacion-comparativa") {
     const periodoActual = periodoBalanza(granularidad, periodo), periodoAnterior = periodoBalanza(granularidad, comparar);
