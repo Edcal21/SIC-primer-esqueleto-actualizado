@@ -1,12 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { cuentasBancarias, cuentasContables, detallesMovimientos, iglesias, movimientosCuentas } from "../../../../db/schema";
+import { cuentasBancarias, detallesMovimientos, iglesias, movimientosCuentas } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { leerAuxiliarContable } from "../../../../lib/auxiliar";
+import { cargarCatalogoMovimiento } from "../../../../lib/catalogoConsultas";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { construirDetallesMovimiento } from "../../../../lib/movimientos";
 import { verificarPeriodosAbiertos } from "../../../../lib/periodos";
-import { verificarRateLimit } from "../../../../lib/security";
+import { verificarRateLimit, codigoPostgres } from "../../../../lib/security";
 import { obtenerTasaVigente } from "../../../../lib/tasas";
 
 export async function POST(request: Request) {
@@ -48,14 +49,17 @@ export async function POST(request: Request) {
           .where(and(eq(cuentasBancarias.numeroCuenta, movimiento.cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa"))).limit(1);
         if (!cuentaBancaria) throw new Error(`La cuenta bancaria ${movimiento.cuentaBancariaNumero} no existe o está inactiva`);
 
+        // Una sola consulta por movimiento en vez de una por línea; el mensaje sigue nombrando la
+        // fila del archivo para que el contador ubique el error sin abrir el sistema.
+        const catalogo = await cargarCatalogoMovimiento(tx, movimiento.detalles.map(detalle => detalle.cuentaCodigo));
         for (const detalle of movimiento.detalles) {
-          const [cuenta] = await tx.select({ codigo: cuentasContables.codigo, descripcion: cuentasContables.descripcion }).from(cuentasContables)
-            .where(and(eq(cuentasContables.codigo, detalle.cuentaCodigo), eq(cuentasContables.estado, "activa"), eq(cuentasContables.esCuentaMovimiento, true))).limit(1);
-          if (!cuenta) throw new Error(`Fila ${detalle.numeroLinea}: la cuenta ${detalle.cuentaCodigo} no existe, está inactiva o no es de movimiento`);
+          if (!catalogo.has(detalle.cuentaCodigo)) {
+            throw new Error(`Fila ${detalle.numeroLinea}: la cuenta ${detalle.cuentaCodigo} no existe, está inactiva o no es de movimiento`);
+          }
         }
 
         const tasaUsd = cuentaBancaria.moneda === "USD" ? await obtenerTasaVigente(tx, movimiento.fecha) : null;
-        const resultadoDetalles = construirDetallesMovimiento(movimiento.detalles, { cuentaBancariaMoneda: cuentaBancaria.moneda, tasaUsd });
+        const resultadoDetalles = construirDetallesMovimiento(movimiento.detalles, { cuentaBancariaMoneda: cuentaBancaria.moneda, tasaUsd, catalogo });
         if (!resultadoDetalles.ok) throw new Error(`Movimiento ${movimiento.referencia ?? movimiento.concepto}: ${resultadoDetalles.error}`);
 
         const [creado] = await tx.insert(movimientosCuentas).values({
@@ -107,10 +111,10 @@ export async function POST(request: Request) {
     return Response.json({ importacion: result }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Auxiliary ledger import failed", error);
-    if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+    if (codigoPostgres(error) === "23505") {
       return jsonError("El auxiliar contiene un movimiento duplicado por fecha, iglesia, cuenta bancaria y referencia", 409);
     }
-    if (error && typeof error === "object" && "code" in error && error.code === "23514") {
+    if (codigoPostgres(error) === "23514") {
       return jsonError("El auxiliar contiene movimientos que no cumplen partida doble", 400);
     }
     return jsonError(error instanceof Error ? error.message : "No se pudo guardar el auxiliar contable", 500);

@@ -2,9 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { construirDetallesMovimiento } from "../lib/movimientos.ts";
 
-const cuentaNio = { cuentaBancariaMoneda: "NIO", tasaUsd: null };
-const cuentaUsdConTasa = { cuentaBancariaMoneda: "USD", tasaUsd: { tasa: "36.500000" } };
-const cuentaUsdSinTasa = { cuentaBancariaMoneda: "USD", tasaUsd: null };
+/** El catálogo lo resuelve el servidor; las pruebas simulan las cuentas activas de movimiento. */
+const catalogo = new Map([
+  ["10100001", "Banco USD"],
+  ["40100001", "Ingresos"],
+  ["51010100", "Servicios básicos"],
+  ["60100001", "Gasto A"],
+  ["60100002", "Gasto B"],
+]);
+
+const cuentaNio = { cuentaBancariaMoneda: "NIO", tasaUsd: null, catalogo };
+const cuentaUsdConTasa = { cuentaBancariaMoneda: "USD", tasaUsd: { tasa: "36.500000" }, catalogo };
+const cuentaUsdSinTasa = { cuentaBancariaMoneda: "USD", tasaUsd: null, catalogo };
+const asientoDiario = { cuentaBancariaMoneda: null, tasaUsd: null, catalogo };
 
 const lineaBanco = (extra = {}) => ({ tipo: "debito", cuentaCodigo: "10100001", cuentaNombre: "Banco USD", afectaCuentaBancaria: true, ...extra });
 const lineaContraparte = (extra = {}) => ({ tipo: "credito", cuentaCodigo: "40100001", cuentaNombre: "Ingresos", monto: "100.00", ...extra });
@@ -127,4 +137,68 @@ test("acepta varias líneas bancarias si todas van en la misma dirección", () =
   const marcadas = resultado.detalles.filter(detalle => detalle.afectaCuentaBancaria);
   assert.equal(marcadas.length, 2);
   assert.equal(marcadas.reduce((total, d) => total + Number(d.montoOriginal), 0), 100);
+});
+
+test("rechaza una línea cuyo código no está en el catálogo de cuentas de movimiento", () => {
+  const resultado = construirDetallesMovimiento(
+    [lineaBanco({ montoOriginal: "100.00" }), lineaContraparte({ cuentaCodigo: "99999999", monto: "3650.00" })],
+    cuentaUsdConTasa,
+  );
+  assert.equal(resultado.ok, false);
+  if (resultado.ok) return;
+  assert.match(resultado.error, /La cuenta 99999999 no existe en el catálogo/);
+});
+
+test("el nombre de cuenta sale del catálogo del servidor, no del payload del cliente", () => {
+  const resultado = construirDetallesMovimiento(
+    [
+      { tipo: "debito", cuentaCodigo: "51010100", cuentaNombre: "NOMBRE FALSIFICADO", monto: "500.00" },
+      { tipo: "credito", cuentaCodigo: "40100001", cuentaNombre: "OTRO FALSIFICADO", monto: "500.00" },
+    ],
+    asientoDiario,
+  );
+  assert.equal(resultado.ok, true);
+  if (!resultado.ok) return;
+  assert.equal(resultado.detalles[0].cuentaNombre, "Servicios básicos");
+  assert.equal(resultado.detalles[1].cuentaNombre, "Ingresos");
+});
+
+test("un asiento de diario sin cuenta bancaria no exige línea bancaria", () => {
+  const resultado = construirDetallesMovimiento(
+    [
+      { tipo: "debito", cuentaCodigo: "51010100", monto: "1200.00" },
+      { tipo: "credito", cuentaCodigo: "40100001", monto: "1200.00" },
+    ],
+    asientoDiario,
+  );
+  assert.equal(resultado.ok, true);
+  if (!resultado.ok) return;
+  assert.equal(resultado.detalles.every(detalle => detalle.afectaCuentaBancaria === false), true);
+  assert.equal(resultado.detalles.every(detalle => detalle.moneda === "NIO" && detalle.tasaCambio === "1.000000"), true);
+});
+
+test("un asiento de diario rechaza líneas marcadas como bancarias", () => {
+  const resultado = construirDetallesMovimiento(
+    [
+      { tipo: "debito", cuentaCodigo: "51010100", monto: "1200.00", afectaCuentaBancaria: true },
+      { tipo: "credito", cuentaCodigo: "40100001", monto: "1200.00" },
+    ],
+    asientoDiario,
+  );
+  assert.equal(resultado.ok, false);
+  if (resultado.ok) return;
+  assert.match(resultado.error, /Un asiento de diario no tiene cuenta bancaria/);
+});
+
+test("una minuta bancaria sigue exigiendo al menos una línea marcada", () => {
+  const resultado = construirDetallesMovimiento(
+    [
+      { tipo: "debito", cuentaCodigo: "51010100", monto: "1200.00" },
+      { tipo: "credito", cuentaCodigo: "40100001", monto: "1200.00" },
+    ],
+    cuentaNio,
+  );
+  assert.equal(resultado.ok, false);
+  if (resultado.ok) return;
+  assert.match(resultado.error, /Marque al menos una línea/);
 });

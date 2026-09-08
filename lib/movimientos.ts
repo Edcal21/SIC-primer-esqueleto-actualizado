@@ -24,10 +24,14 @@ export type DetalleParaInsertar = {
 export type TasaResuelta = { tasa: string } | null;
 
 export type ContextoMovimiento = {
-  /** Moneda de la cuenta bancaria del encabezado de la minuta. */
-  cuentaBancariaMoneda: "USD" | "NIO";
+  /** Moneda de la cuenta bancaria del encabezado, o null cuando la minuta es un asiento de diario
+   *  sin cuenta bancaria (ajustes, reclasificaciones, provisiones). */
+  cuentaBancariaMoneda: "USD" | "NIO" | null;
   /** Tasa NIO/USD vigente para la fecha de la minuta, ya normalizada, o null si no hay tasa registrada. */
   tasaUsd: TasaResuelta;
+  /** Cuentas de movimiento activas indexadas por código, leídas del catálogo en el servidor.
+   *  El nombre de cuenta se toma de aquí y nunca del cliente: el cliente solo elige el código. */
+  catalogo: Map<string, string>;
 };
 
 export type ResultadoDetalles = { ok: true; detalles: DetalleParaInsertar[] } | { ok: false; error: string };
@@ -44,7 +48,6 @@ export function construirDetallesMovimiento(detalles: DetalleEntrada[], contexto
   const normalizados = detalles.map(detalle => ({
     tipo: detalle.tipo?.trim().toLowerCase(),
     cuentaCodigo: detalle.cuentaCodigo?.trim(),
-    cuentaNombre: detalle.cuentaNombre?.trim(),
     monto: detalle.monto,
     montoOriginal: detalle.montoOriginal,
     afectaCuentaBancaria: Boolean(detalle.afectaCuentaBancaria),
@@ -52,11 +55,28 @@ export function construirDetallesMovimiento(detalles: DetalleEntrada[], contexto
 
   for (const detalle of normalizados) {
     if (detalle.tipo !== "credito" && detalle.tipo !== "debito") return { ok: false, error: "Tipo inválido; utilice crédito o débito" };
-    if (!detalle.cuentaCodigo || !detalle.cuentaNombre) return { ok: false, error: "La cuenta del detalle es obligatoria" };
+    if (!detalle.cuentaCodigo) return { ok: false, error: "La cuenta del detalle es obligatoria" };
+    // El catálogo es la única fuente de verdad: si el código no está activo y marcado como cuenta
+    // de movimiento, la línea se rechaza aunque el cliente haya enviado un nombre válido.
+    if (!contexto.catalogo.has(detalle.cuentaCodigo)) {
+      return {
+        ok: false,
+        error: `La cuenta ${detalle.cuentaCodigo} no existe en el catálogo, está inactiva o no admite movimientos directos`,
+      };
+    }
   }
 
   const marcadas = normalizados.filter(detalle => detalle.afectaCuentaBancaria);
-  if (!marcadas.length) {
+  // Sin cuenta bancaria en el encabezado la minuta es un asiento de diario: no hay banco al que
+  // afectar, así que no se exige línea bancaria y se rechaza cualquier línea marcada como tal.
+  if (contexto.cuentaBancariaMoneda === null) {
+    if (marcadas.length) {
+      return {
+        ok: false,
+        error: "Un asiento de diario no tiene cuenta bancaria: ninguna línea puede marcarse como línea bancaria. Si el movimiento afecta un banco, indique la cuenta bancaria en el encabezado.",
+      };
+    }
+  } else if (!marcadas.length) {
     return { ok: false, error: "Marque al menos una línea como la que afecta la cuenta bancaria de la minuta" };
   }
 
@@ -101,7 +121,7 @@ export function construirDetallesMovimiento(detalles: DetalleEntrada[], contexto
     detallesFinales.push({
       tipo: detalle.tipo as "credito" | "debito",
       cuentaCodigo: detalle.cuentaCodigo!,
-      cuentaNombre: detalle.cuentaNombre!,
+      cuentaNombre: contexto.catalogo.get(detalle.cuentaCodigo!)!,
       monto,
       orden: index + 1,
       afectaCuentaBancaria: esBanco,

@@ -3,9 +3,11 @@ import { getDb } from "../../../db";
 import { cuentasBancarias, detallesMovimientos, iglesias, lineasReporteBancario, movimientosCuentas } from "../../../db/schema";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
+import { cargarCatalogoMovimiento } from "../../../lib/catalogoConsultas";
 import { construirDetallesMovimiento, type DetalleEntrada } from "../../../lib/movimientos";
 import { obtenerTasaVigente } from "../../../lib/tasas";
 import { verificarPeriodosAbiertos } from "../../../lib/periodos";
+import { codigoPostgres } from "../../../lib/security";
 
 type DetallePayload = DetalleEntrada;
 
@@ -52,14 +54,13 @@ export async function POST(request: Request) {
 
   const fecha = body.fecha?.trim();
   const iglesiaCodigo = body.iglesiaCodigo?.trim();
-  const cuentaBancariaNumero = body.cuentaBancariaNumero?.trim();
+  const cuentaBancariaNumero = body.cuentaBancariaNumero?.trim() || null;
   const referencia = body.referencia?.trim() || null;
   const concepto = body.concepto?.trim();
   const detalles = body.detalles ?? [];
 
   if (!fecha || !fechaRegex.test(fecha)) return jsonError("Fecha inválida", 400);
   if (!iglesiaCodigo) return jsonError("La iglesia es obligatoria", 400);
-  if (!cuentaBancariaNumero) return jsonError("La cuenta bancaria es obligatoria", 400);
   if (!concepto) return jsonError("Concepto es obligatorio", 400);
 
   const db = getDb();
@@ -70,12 +71,19 @@ export async function POST(request: Request) {
     const [iglesia] = await db.select({ codigo: iglesias.codigo }).from(iglesias)
       .where(and(eq(iglesias.codigo, iglesiaCodigo), eq(iglesias.estado, "activa"))).limit(1);
     if (!iglesia) return jsonError("La iglesia seleccionada no existe o está inactiva", 400);
-    const [cuentaBancaria] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta, moneda: cuentasBancarias.moneda }).from(cuentasBancarias)
-      .where(and(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa"))).limit(1);
-    if (!cuentaBancaria) return jsonError("La cuenta bancaria seleccionada no existe o está inactiva", 400);
+    // Sin cuenta bancaria la minuta es un asiento de diario (ajuste, reclasificación, provisión):
+    // no toca ningún banco, no requiere línea bancaria y no entra en conciliación.
+    let cuentaBancariaMoneda: "USD" | "NIO" | null = null;
+    if (cuentaBancariaNumero) {
+      const [cuentaBancaria] = await db.select({ numeroCuenta: cuentasBancarias.numeroCuenta, moneda: cuentasBancarias.moneda }).from(cuentasBancarias)
+        .where(and(eq(cuentasBancarias.numeroCuenta, cuentaBancariaNumero), eq(cuentasBancarias.estado, "activa"))).limit(1);
+      if (!cuentaBancaria) return jsonError("La cuenta bancaria seleccionada no existe o está inactiva", 400);
+      cuentaBancariaMoneda = cuentaBancaria.moneda;
+    }
 
-    const tasaUsd = cuentaBancaria.moneda === "USD" ? await obtenerTasaVigente(db, fecha) : null;
-    const resultadoDetalles = construirDetallesMovimiento(detalles, { cuentaBancariaMoneda: cuentaBancaria.moneda, tasaUsd });
+    const tasaUsd = cuentaBancariaMoneda === "USD" ? await obtenerTasaVigente(db, fecha) : null;
+    const catalogo = await cargarCatalogoMovimiento(db, detalles.map(detalle => detalle.cuentaCodigo ?? ""));
+    const resultadoDetalles = construirDetallesMovimiento(detalles, { cuentaBancariaMoneda, tasaUsd, catalogo });
     if (!resultadoDetalles.ok) return jsonError(resultadoDetalles.error, 400);
     const detallesNormalizados = resultadoDetalles.detalles;
 
@@ -109,7 +117,7 @@ export async function POST(request: Request) {
         accion: "Registró movimiento contable",
         entidad: "movimientos_cuentas",
         entidadId: movimiento.id,
-        detalle: `${fecha} · Iglesia ${iglesiaCodigo} · Cuenta bancaria ${cuentaBancariaNumero} · ${concepto}`,
+        detalle: `${fecha} · Iglesia ${iglesiaCodigo} · ${cuentaBancariaNumero ? `Cuenta bancaria ${cuentaBancariaNumero}` : "Asiento de diario"} · ${concepto}`,
       });
 
       return { movimiento, detalles: detallesCreados };
@@ -118,10 +126,10 @@ export async function POST(request: Request) {
     return Response.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Movement creation failed", error);
-    if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+    if (codigoPostgres(error) === "23505") {
       return jsonError("Ya existe una minuta registrada con la misma fecha, iglesia, cuenta bancaria y referencia", 409);
     }
-    if (error && typeof error === "object" && "code" in error && error.code === "23514") {
+    if (codigoPostgres(error) === "23514") {
       return jsonError("La minuta no cumple las reglas contables de partida doble", 400);
     }
     return jsonError("No se pudo guardar el movimiento", 500);

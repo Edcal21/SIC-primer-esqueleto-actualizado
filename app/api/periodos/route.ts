@@ -2,6 +2,7 @@ import { getDb } from "../../../db";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 import { abrirPeriodo, esPeriodoValido, impedimentosParaCerrar, listarPeriodos, periodosConActividad } from "../../../lib/periodos";
+import { codigoPostgres } from "../../../lib/security";
 
 type PeriodoPayload = { periodo?: string };
 
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     return Response.json({ periodo: creado }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Accounting period creation failed", error);
-    if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+    if (codigoPostgres(error) === "23505") {
       return jsonError("Ese período ya está registrado", 409);
     }
     return jsonError("No se pudo abrir el período contable", 500);

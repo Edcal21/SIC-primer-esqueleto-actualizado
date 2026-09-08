@@ -315,7 +315,8 @@ Es el rol que **captura** información. No aprueba conciliaciones ni cierra per�
 | Campo | Obligatorio | Notas |
 |---|:--:|---|
 | **Fecha** | Sí | Determina el período contable y la tasa de cambio que se aplica |
-| **Cuenta bancaria** | Sí | Muestra `nombre · número · moneda`. La moneda define si se pide importe en dólares |
+| **Tipo de minuta** | Sí | **Bancaria** (afecta un banco y se concilia) o **Asiento de diario** (ajuste que no toca ningún banco) |
+| **Cuenta bancaria** | Solo si es bancaria | Muestra `nombre · número · moneda`. La moneda define si se pide importe en dólares |
 | **Iglesia** | Sí | Se elige del catálogo de iglesias activas |
 | **Referencia** | No | Número de minuta o referencia bancaria. Máximo 120 caracteres |
 | **Concepto** | Sí | Descripción del movimiento |
@@ -330,6 +331,14 @@ Es el rol que **captura** información. No aprueba conciliaciones ni cierra per�
 
 El sistema responde: *"Movimiento registrado y auditado correctamente"*.
 
+> ### Los dos tipos de minuta
+>
+> **Bancaria.** El movimiento entra o sale de una cuenta bancaria. Exige elegir la cuenta y marcar la **línea bancaria**. Aparece en la conciliación.
+>
+> **Asiento de diario.** Ajustes, reclasificaciones, provisiones, depreciaciones: asientos que cuadran entre cuentas contables sin tocar ningún banco. No pide cuenta bancaria, no admite líneas marcadas como bancarias y **no aparece en la conciliación**.
+>
+> Al elegir *Asiento de diario* el sistema oculta el campo de cuenta bancaria y las casillas de línea bancaria. Todo lo demás —partida doble, catálogo, período, auditoría— se aplica igual.
+
 > ### La casilla "Línea bancaria": el concepto que más se malinterpreta
 >
 > El sistema **no asume** que el monto que afecta al banco es la suma de los débitos. Usted se lo indica marcando la casilla.
@@ -342,7 +351,9 @@ El sistema responde: *"Movimiento registrado y auditado correctamente"*.
 
 | Validación | Mensaje |
 |---|---|
-| Al menos una línea marcada como bancaria | *"Marque al menos una línea como la que afecta la cuenta bancaria de la minuta"* |
+| Al menos una línea marcada como bancaria (solo minutas bancarias) | *"Marque al menos una línea como la que afecta la cuenta bancaria de la minuta"* |
+| Un asiento de diario no admite líneas bancarias | *"Un asiento de diario no tiene cuenta bancaria: ninguna línea puede marcarse como línea bancaria…"* |
+| **La cuenta debe existir en el catálogo, estar activa y admitir movimientos** | *"La cuenta NNNNNNNN no existe en el catálogo, está inactiva o no admite movimientos directos"* |
 | Todas las líneas bancarias en la misma dirección | *"Las líneas que afectan la cuenta bancaria deben ir todas en la misma dirección (todas débito o todas crédito). Si la minuta representa una entrada y una salida, regístrelas por separado."* |
 | Mínimo dos líneas | *"Debe agregar al menos dos detalles para cumplir partida doble"* |
 | Débitos = créditos | *"La minuta debe cuadrar: débitos y créditos tienen que ser iguales"* |
@@ -1113,6 +1124,9 @@ Los mensajes se dividen en tres clases:
 | *"La minuta no cumple las reglas contables de partida doble"* | La base de datos rechazó el asiento al guardarlo | Revise las líneas. Si el asiento se ve correcto, reporte con captura | Responsable técnico |
 | *"Complete cuenta y monto en todas las líneas"* | Hay líneas incompletas | Complete o elimine las líneas vacías | — |
 | *"Hay líneas con un código que no pertenece al catálogo de cuentas de movimiento"* | Usó una cuenta de agrupación, no de movimiento | Elija una cuenta marcada como *cuenta de movimiento* | Administrador, si falta la cuenta |
+| *"La cuenta NNNNNNNN no existe en el catálogo, está inactiva o no admite movimientos directos"* | La validación del servidor rechazó el código: no existe, está inactivo o es cuenta de agrupación | Elija una cuenta activa de movimiento | Administrador, si falta la cuenta |
+| *"Un asiento de diario no tiene cuenta bancaria: ninguna línea puede marcarse como línea bancaria…"* | Marcó una línea bancaria en un asiento de diario | Desmarque la casilla, o cambie el tipo a *Bancaria* e indique la cuenta | — |
+| *"Seleccione la cuenta bancaria, o cambie el tipo a Asiento de diario si la minuta no afecta ningún banco"* | Minuta bancaria sin cuenta elegida | Elija la cuenta o cambie el tipo | — |
 | *"Tipo inválido; utilice crédito o débito"* | Valor inesperado en el tipo de línea | Vuelva a seleccionar el tipo | — |
 | *"La iglesia seleccionada no existe o está inactiva"* | La iglesia se desactivó | Elija otra iglesia o pida la reactivación | Administrador |
 | *"La cuenta bancaria seleccionada no existe o está inactiva"* | La cuenta se desactivó | Elija otra o pida la reactivación | Administrador |
@@ -1525,6 +1539,7 @@ El sistema **reconoce automáticamente** los encabezados más usados por la banc
 |---|---|
 | **Minuta** | Asiento contable registrado en el sistema. Se compone de líneas de débito y crédito que deben cuadrar |
 | **Partida doble** | Regla contable que el sistema valida: el total de débitos debe ser igual al total de créditos |
+| **Asiento de diario** | Minuta que cuadra entre cuentas contables sin afectar ninguna cuenta bancaria: ajustes, reclasificaciones, provisiones. No entra en conciliación |
 | **Línea bancaria** | La línea de la minuta que representa el movimiento real de dinero en la cuenta bancaria. **No** es necesariamente la suma de todos los débitos |
 | **Balanza de comprobación** | Reporte mensual con saldos iniciales, movimientos y saldos finales por cuenta |
 | **Auxiliar contable** | Archivo de movimientos que el sistema convierte en minutas cuadradas al importarlo |

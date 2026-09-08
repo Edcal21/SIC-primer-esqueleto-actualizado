@@ -98,7 +98,15 @@ export const movimientosCuentas = pgTable("movimientos_cuentas", {
   index("idx_movimientos_cuentas_cuenta_bancaria").on(table.cuentaBancariaNumero),
   index("idx_movimientos_cuentas_referencia").on(table.referencia),
   index("idx_movimientos_cuentas_estado").on(table.estado),
-  uniqueIndex("ux_movimientos_unico").on(table.fecha, table.iglesiaCodigo, table.cuentaBancariaNumero, table.referencia).where(sql`${table.estado} = 'registrado'`),
+  /** COALESCE en las columnas nulas: sin él, PostgreSQL considera distinto cada NULL y dejaría
+   *  pasar minutas duplicadas sin referencia o asientos de diario sin cuenta bancaria.
+   *  Ver drizzle/0024_minuta_unica_nulos.sql. */
+  uniqueIndex("ux_movimientos_unico").on(
+    table.fecha,
+    sql`coalesce(${table.iglesiaCodigo}, '')`,
+    sql`coalesce(${table.cuentaBancariaNumero}, '')`,
+    sql`coalesce(${table.referencia}, '')`,
+  ).where(sql`${table.estado} = 'registrado'`),
   check("ck_movimientos_cuentas_estado", sql`${table.estado} in ('registrado', 'anulado')`),
 ]);
 

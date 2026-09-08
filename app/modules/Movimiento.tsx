@@ -31,6 +31,9 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
   const [periodos, setPeriodos] = useState<PeriodoContable[]>([]);
   const [fecha, setFecha] = useState(new Date().toLocaleDateString("en-CA"));
   const [cuentaBancariaNumero, setCuentaBancariaNumero] = useState("");
+  /** "bancaria" afecta una cuenta de banco y entra en conciliación; "diario" es un ajuste,
+   *  reclasificación o provisión que no toca ningún banco. */
+  const [tipoMinuta, setTipoMinuta] = useState<"bancaria" | "diario">("bancaria");
   const formRef = useRef<HTMLFormElement | null>(null);
   const buscarCuenta = (codigo: string) => cuentas.find(cuenta => cuenta.codigo === codigo.trim());
 
@@ -83,7 +86,8 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
       .catch(() => {});
   }, []);
 
-  const cuentaBancaria = cuentasBancarias.find(cuenta => cuenta.numeroCuenta === cuentaBancariaNumero);
+  const esDiario = tipoMinuta === "diario";
+  const cuentaBancaria = esDiario ? undefined : cuentasBancarias.find(cuenta => cuenta.numeroCuenta === cuentaBancariaNumero);
   const esUsd = cuentaBancaria?.moneda === "USD";
   const tasaVigente = esUsd ? tasas.find(tasa => tasa.fecha === fecha) : undefined;
   const periodoBloqueado = periodoCerrado(periodos, periodoDeFechaUi(fecha));
@@ -127,7 +131,10 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
     if (periodoBloqueado) {
       return setError(`El período ${periodoDeFechaUi(fecha)} está cerrado. Un administrador debe reabrirlo desde Cierre contable antes de registrar minutas con esa fecha.`);
     }
-    if (!detalles.some(detalle => detalle.afectaCuentaBancaria)) {
+    if (!esDiario && !cuentaBancariaNumero) {
+      return setError("Seleccione la cuenta bancaria, o cambie el tipo a Asiento de diario si la minuta no afecta ningún banco");
+    }
+    if (!esDiario && !detalles.some(detalle => detalle.afectaCuentaBancaria)) {
       return setError("Marque al menos una línea como la que afecta la cuenta bancaria de la minuta");
     }
     if (esUsd && !tasaVigente) {
@@ -142,7 +149,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
         cuentaNombre: cuenta?.descripcion,
         monto: esLineaUsd ? undefined : detalle.monto,
         montoOriginal: esLineaUsd ? detalle.montoOriginal : undefined,
-        afectaCuentaBancaria: Boolean(detalle.afectaCuentaBancaria),
+        afectaCuentaBancaria: !esDiario && Boolean(detalle.afectaCuentaBancaria),
         orden: index + 1,
       };
     });
@@ -160,7 +167,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
     const iglesia = iglesias.find(item=>item.codigo===String(form.get("iglesiaCodigo")??""));
     requestConfirmation({
       title: "Confirmar asiento contable",
-      message: `Se registrará una minuta por ${dinero.format(totalDebitos)} para ${iglesia?.nombre ?? "la iglesia seleccionada"} en ${cuentaBancaria?.nombre ?? "la cuenta bancaria seleccionada"}. Esta operación quedará registrada en la auditoría del sistema.`,
+      message: `Se registrará ${esDiario ? "un asiento de diario" : "una minuta"} por ${dinero.format(totalDebitos)} para ${iglesia?.nombre ?? "la iglesia seleccionada"} ${esDiario ? "sin afectar ninguna cuenta bancaria" : `en ${cuentaBancaria?.nombre ?? "la cuenta bancaria seleccionada"}`}. Esta operación quedará registrada en la auditoría del sistema.`,
       confirmLabel: "Registrar movimiento",
       onConfirm: async () => {
         setSaving(true);
@@ -171,7 +178,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
             body: JSON.stringify({
               fecha,
               iglesiaCodigo: form.get("iglesiaCodigo"),
-              cuentaBancariaNumero,
+              cuentaBancariaNumero: esDiario ? null : cuentaBancariaNumero,
               referencia: form.get("referencia"),
               concepto: form.get("concepto"),
               detalles: detallesPayload,
@@ -220,7 +227,10 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
         <div className="sectionHead"><b>Información general</b><small>Identificación de la minuta contable</small></div>
         <div className="formGrid">
           <label>Fecha<input name="fecha" type="date" required value={fecha} onChange={event => setFecha(event.target.value)}/></label>
-          <label>Cuenta bancaria<select name="cuentaBancariaNumero" required value={cuentaBancariaNumero} onChange={event => setCuentaBancariaNumero(event.target.value)} disabled={!cuentasBancarias.length}><option value="" disabled>{cuentasBancarias.length ? "Seleccione una cuenta bancaria" : "Cargando cuentas bancarias..."}</option>{cuentasBancarias.map(cuenta=><option key={cuenta.numeroCuenta} value={cuenta.numeroCuenta}>{cuenta.nombre} · {cuenta.numeroCuenta} · {cuenta.moneda}</option>)}</select></label>
+          <label>Tipo de minuta<select value={tipoMinuta} onChange={event => { const valor = event.target.value as "bancaria" | "diario"; setTipoMinuta(valor); if (valor === "diario") { setCuentaBancariaNumero(""); setDetalles(current => current.map(detalle => ({ ...detalle, afectaCuentaBancaria: false }))); } }}><option value="bancaria">Bancaria</option><option value="diario">Asiento de diario</option></select><small>{esDiario ? "Ajuste o reclasificación: no afecta bancos ni entra en conciliación" : "Afecta una cuenta bancaria y se concilia contra el estado de cuenta"}</small></label>
+          {esDiario
+            ? null
+            : <label>Cuenta bancaria<select name="cuentaBancariaNumero" required value={cuentaBancariaNumero} onChange={event => setCuentaBancariaNumero(event.target.value)} disabled={!cuentasBancarias.length}><option value="" disabled>{cuentasBancarias.length ? "Seleccione una cuenta bancaria" : "Cargando cuentas bancarias..."}</option>{cuentasBancarias.map(cuenta=><option key={cuenta.numeroCuenta} value={cuenta.numeroCuenta}>{cuenta.nombre} · {cuenta.numeroCuenta} · {cuenta.moneda}</option>)}</select></label>}
           <label className="wide">Iglesia<select name="iglesiaCodigo" required defaultValue="" disabled={!iglesias.length}><option value="" disabled>{iglesias.length ? "Seleccione una iglesia" : "Cargando iglesias..."}</option>{iglesias.map(iglesia=><option key={iglesia.codigo} value={iglesia.codigo}>{iglesia.codigo} · {iglesia.nombre}</option>)}</select></label>
           <label>Referencia<input name="referencia" maxLength={120} placeholder="Número de minuta o referencia bancaria"/></label>
           <label className="wide">Concepto<textarea name="concepto" required/></label>
@@ -243,7 +253,7 @@ export default function Movimiento({ notify, requestConfirmation }: { notify: (m
               <input list="cuentasMovimiento" value={detalle.cuentaCodigo} onChange={event=>updateDetalle(index,{cuentaCodigo:event.target.value})} required disabled={loading || !cuentas.length} placeholder={loading?"Cargando catálogo...":"Buscar cuenta por código"} aria-label={`Cuenta contable de la línea ${index+1}`}/>
               <small className={codigoEscrito && !cuenta ? "accountName invalid" : "accountName"}>{cuenta ? cuenta.descripcion : codigoEscrito ? "Código fuera del catálogo de cuentas de movimiento" : "Escriba el código o elíjalo del catálogo"}</small>
             </div>
-            <label className="bankLineToggle"><input type="checkbox" checked={Boolean(detalle.afectaCuentaBancaria)} onChange={event=>updateDetalle(index,{afectaCuentaBancaria:event.target.checked})} aria-label={`La línea ${index+1} afecta la cuenta bancaria`}/><small>Línea bancaria</small></label>
+            {esDiario ? null : <label className="bankLineToggle"><input type="checkbox" checked={Boolean(detalle.afectaCuentaBancaria)} onChange={event=>updateDetalle(index,{afectaCuentaBancaria:event.target.checked})} aria-label={`La línea ${index+1} afecta la cuenta bancaria`}/><small>Línea bancaria</small></label>}
             {esLineaUsd
               ? <div className="usdLineCell">
                   <input value={detalle.montoOriginal ?? ""} onChange={event=>updateDetalle(index,{montoOriginal:event.target.value})} type="number" required min="0.01" step="0.01" placeholder="0.00 USD" aria-label={`Importe en USD de la línea ${index+1}`}/>

@@ -16,6 +16,13 @@ import {
   recalcularConciliacion,
 } from "../lib/banco.ts";
 import { construirDetallesMovimiento } from "../lib/movimientos.ts";
+
+/** Catálogo simulado: el servidor valida los códigos y resuelve el nombre desde aquí. */
+const catalogoPrueba = new Map([
+  ["10100001", "Banco USD"],
+  ["10100002", "Banco NIO"],
+  ["40100001", "Ingresos"],
+]);
 import { actualizarTasa, crearTasa, obtenerTasaVigente } from "../lib/tasas.ts";
 import { tieneMovimientosIncompatibles } from "../lib/cuentasBancarias.ts";
 
@@ -82,7 +89,7 @@ async function crearMovimientoUsd(fecha, montoOriginalUsd, tasa, referencia) {
         return (Number(`${entero}.${decimales}`) * Number(tasa)).toFixed(2);
       })() },
     ],
-    { cuentaBancariaMoneda: "USD", tasaUsd: { tasa } },
+    { cuentaBancariaMoneda: "USD", tasaUsd: { tasa }, catalogo: catalogoPrueba },
   );
   assert.equal(resultado.ok, true, resultado.ok ? "" : resultado.error);
   if (!resultado.ok) throw new Error(resultado.error);
@@ -153,7 +160,7 @@ test("rechaza tasa ausente o inválida y bloquea el registro con error claro", a
       { tipo: "debito", cuentaCodigo: "10100001", cuentaNombre: "Banco USD", afectaCuentaBancaria: true, montoOriginal: "50.00" },
       { tipo: "credito", cuentaCodigo: "40100001", cuentaNombre: "Ingresos", monto: "1825.00" },
     ],
-    { cuentaBancariaMoneda: "USD", tasaUsd: await obtenerTasaVigente(db, "2099-01-01") }, // fecha sin tasa registrada
+    { cuentaBancariaMoneda: "USD", tasaUsd: await obtenerTasaVigente(db, "2099-01-01"), catalogo: catalogoPrueba }, // fecha sin tasa registrada
   );
   assert.equal(resultado.ok, false);
   assert.match(resultado.error, /Falta registrar la tasa de cambio/);
@@ -249,7 +256,7 @@ test("regresión NIO: una minuta en córdobas conserva tasa 1 y su importe origi
       { tipo: "debito", cuentaCodigo: "10100002", cuentaNombre: "Banco NIO", afectaCuentaBancaria: true, monto: "850.00" },
       { tipo: "credito", cuentaCodigo: "40100001", cuentaNombre: "Ingresos", monto: "850.00" },
     ],
-    { cuentaBancariaMoneda: "NIO", tasaUsd: null },
+    { cuentaBancariaMoneda: "NIO", tasaUsd: null, catalogo: catalogoPrueba },
   );
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;

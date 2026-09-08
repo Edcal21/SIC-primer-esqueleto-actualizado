@@ -61,3 +61,21 @@ export function verificarRateLimit(request: Request, options: RateLimitOptions):
   current.count += 1;
   return null;
 }
+
+/**
+ * Devuelve el SQLSTATE del error de PostgreSQL, buscándolo también en la cadena de `cause`.
+ * Drizzle envuelve el error original, así que `error.code` viene vacío en el objeto de primer
+ * nivel y una comprobación directa deja pasar violaciones de unicidad como fallas genéricas.
+ */
+export function codigoPostgres(error: unknown): string | null {
+  let actual: unknown = error;
+  for (let profundidad = 0; actual && typeof actual === "object" && profundidad < 5; profundidad += 1) {
+    const codigo = (actual as { code?: unknown }).code;
+    if (typeof codigo === "string" && codigo) return codigo;
+    const causa = (actual as { cause?: unknown }).cause;
+    if (causa === actual) break;
+    actual = causa;
+  }
+  return null;
+}
+

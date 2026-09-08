@@ -3,6 +3,7 @@ import { getDb } from "../../../db";
 import { registrarAuditoria } from "../../../lib/auditoria";
 import { crearTasa, listarTasas } from "../../../lib/tasas";
 import { verificarPeriodosAbiertos } from "../../../lib/periodos";
+import { codigoPostgres } from "../../../lib/security";
 
 type TasaPayload = { fecha?: string; tasa?: string | number; fuente?: string };
 
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
     return Response.json({ tasa }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Exchange rate creation failed", error);
-    if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+    if (codigoPostgres(error) === "23505") {
       return jsonError("Ya existe una tasa registrada para esa fecha; edítela en vez de crear una nueva", 409);
     }
     if (error instanceof Error && /tasa de cambio/.test(error.message)) return jsonError(error.message, 400);
