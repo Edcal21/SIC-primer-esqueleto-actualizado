@@ -4,8 +4,8 @@ import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, 
 
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
-export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; esTotal?: boolean };
-export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string };
+export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; esTotal?: boolean; esEncabezado?: boolean };
+export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string };
 type Db = ReturnType<typeof getDb>;
 type BalanzaPeriodo = { periodo: string; filas: { codigo: string; concepto: string; debe: number; haber: number; saldo: number }[] };
 type SituacionPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
@@ -66,28 +66,112 @@ async function obtenerSituacionFinanciera(db: Db, periodo: string): Promise<Situ
 
 const claveConcepto = (concepto: string) => concepto.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
 
-/** Compara exclusivamente el Saldo Final de dos Estados de Situación Financiera. */
+const saldoPorConcepto = (periodo: SituacionPeriodo | null, ...conceptos: string[]) => {
+  const claves = conceptos.map(claveConcepto);
+  return periodo?.filas.find(fila => claves.includes(claveConcepto(fila.concepto)))?.saldoFinal ?? 0;
+};
+const variacionSaldo = (actual: SituacionPeriodo, anterior: SituacionPeriodo | null, ...conceptos: string[]) =>
+  saldoPorConcepto(actual, ...conceptos) - saldoPorConcepto(anterior, ...conceptos);
+const sumar = (valores: number[]) => valores.reduce((total, valor) => total + valor, 0);
+const etiquetaFinPeriodo = (periodo: string) => {
+  const [year, month] = periodo.split("-").map(Number);
+  const fecha = new Date(Date.UTC(year, month, 0));
+  const mes = new Intl.DateTimeFormat("es-NI", { month: "long", timeZone: "UTC" }).format(fecha);
+  return `Efectivo al ${fecha.getUTCDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)} ${year}`;
+};
+
+/** Construye las líneas del formato oficial a partir de las variaciones de Saldo Final. */
 export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
-  const anteriores = new Map<string, number[]>();
-  for (const fila of anterior?.filas ?? []) {
-    const key = claveConcepto(fila.concepto), valores = anteriores.get(key) ?? [];
-    valores.push(fila.saldoFinal); anteriores.set(key, valores);
-  }
-  const filas = actual.filas.map(fila => {
-    const previos = anteriores.get(claveConcepto(fila.concepto));
-    const saldoAnterior = previos?.shift() ?? 0;
-    return filaComparativa(fila.concepto, fila.saldoFinal, saldoAnterior, { esTotal: fila.esTotal });
-  });
-  const efectivoActual = actual.filas.find(fila => claveConcepto(fila.concepto) === "total efectivo")?.saldoFinal;
-  const efectivoAnterior = anterior?.filas.find(fila => claveConcepto(fila.concepto) === "total efectivo")?.saldoFinal;
-  if (efectivoActual !== undefined) {
-    filas.push(filaComparativa("Variación neta de efectivo", efectivoActual, efectivoAnterior ?? 0, { esTotal: true }));
-  }
+  const utilidad = sumar([
+    saldoPorConcepto(actual, "Excedente Ingresos s/Egresos acumulados"),
+    saldoPorConcepto(actual, "Excedente Ingresos s/Egresos del ejercicio"),
+  ]);
+  const depreciacion = sumar([
+    variacionSaldo(actual, anterior, "DEPRECIACION DE VEHICULOS"),
+    variacionSaldo(actual, anterior, "DEPRECIACION DE MOB Y EQUIPO", "DEPRECIACION DE MOBILIARIO Y EQUIPOS"),
+  ]);
+  const operacion = [
+    utilidad,
+    depreciacion,
+    0, 0, 0, 0,
+    variacionSaldo(actual, anterior, "Total ACTIVOS POR IMPUESTOS DIFERIDOS"),
+    0, 0, 0,
+    variacionSaldo(actual, anterior, "Total ACREEDORES COMERCIALES"),
+    0,
+    variacionSaldo(actual, anterior, "Total IMPUESTOS CORRIENTES POR PAGAR"),
+    0,
+    variacionSaldo(actual, anterior, "Total OBLIGACIONES A C/P POR BENEF. A LOS EMPLEADOS"),
+    0, 0,
+  ];
+  const cambioDeAnio = Boolean(anterior && actual.periodo.slice(0, 4) !== anterior.periodo.slice(0, 4));
+  const excedenteAcumulado = cambioDeAnio ? -sumar([
+    saldoPorConcepto(anterior, "Excedente Ingresos s/Egresos acumulados"),
+    saldoPorConcepto(anterior, "Excedente Ingresos s/Egresos del ejercicio"),
+  ]) : 0;
+  const inversion = [
+    variacionSaldo(actual, anterior, "EDIFICIOS"),
+    variacionSaldo(actual, anterior, "MOBILIARIO Y EQUIPOS", "MOBILIARIO Y EQUIPO DE OFICINA"),
+    variacionSaldo(actual, anterior, "VEHICULOS"),
+    variacionSaldo(actual, anterior, "TERRENOS"),
+    variacionSaldo(actual, anterior, "Total INCREMENTO O DECREMENTO"),
+    excedenteAcumulado,
+  ];
+  const totalOperacion = sumar(operacion), totalInversion = sumar(inversion);
+  const aumentoNeto = -totalOperacion - totalInversion;
+  const efectivoInicial = saldoPorConcepto(anterior, "Total ACTIVOS CORRIENTES");
+  const efectivoFinal = efectivoInicial + aumentoNeto;
+  const nombresOperacion = ["Utilidad o pérdida del período", "Depreciación", "Cuentas por cobrar a empleados", "Anticipos a justificar", "Cuentas por cobrar por servicios", "Deudores comerciales y otras cuentas por Cobrar", "Impuestos pagados por adelantado", "Pagos anticipados", "Depósito en garantía", "Póliza de seguros", "Acreedores Comerciales", "Certificados a plazo fijo (fondos restringidos)", "Impuestos por pagar", "Retenciones por pagar", "Gastos acumulados por pagar", "Cuentas transitorias", "Depósito sin identificar"];
+  const nombresInversion = ["Edificios", "Mobiliario y Equipo de Oficina", "Vehículos", "Terrenos", "Incremento o Decremento", "Excedente Ingresos/Egresos Acumulados"];
+  const filas: FilaReporte[] = [
+    { concepto: "Actividades de operación", actual: 0, esTotal: true, esEncabezado: true },
+    { concepto: "Flujo de efectivo de las actividades de operación", actual: 0, esTotal: true, esEncabezado: true },
+    ...nombresOperacion.map((concepto, index) => ({ concepto, actual: operacion[index] })),
+    { concepto: "Efectivo neto utilizado en las actividades de operación", actual: totalOperacion, esTotal: true },
+    { concepto: "Flujo de efectivo de las actividades de inversión", actual: 0, esTotal: true, esEncabezado: true },
+    { concepto: "Patrimonio", actual: variacionSaldo(actual, anterior, "Total PATRIMONIO IGLESIA UNIVERSAL DEL REINO DE DIOS") },
+    ...nombresInversion.map((concepto, index) => ({ concepto, actual: inversion[index] })),
+    { concepto: "Efectivo neto utilizado en las actividades de inversión", actual: totalInversion, esTotal: true },
+    { concepto: "Efectivo neto utilizado en las actividades de financiamiento", actual: 0, esTotal: true },
+    { concepto: "Aumento (Disminución) neto en el efectivo", actual: aumentoNeto, esTotal: true },
+    { concepto: etiquetaFinPeriodo(anterior?.periodo ?? actual.periodo), actual: efectivoInicial, esTotal: true },
+    { concepto: etiquetaFinPeriodo(actual.periodo), actual: efectivoFinal, esTotal: true },
+  ];
   const meta = catalogoReportes.find(item => item.tipo === "flujo-efectivo")!;
   return {
     tipo: "flujo-efectivo", titulo: meta.titulo, descripcion: meta.descripcion,
     periodo: Number(actual.periodo.slice(0, 4)), periodoComparativo: anterior ? Number(anterior.periodo.slice(0, 4)) : undefined,
+    periodoFuente: actual.periodo, periodoComparativoFuente: anterior?.periodo,
     moneda: "NIO", fuente: `Estado de Situación Financiera ${actual.periodo}`,
+    columnas: ["Concepto", `${etiqueta} vs ${etiquetaComparativa}`], filas, generadoEn: new Date().toISOString(),
+  };
+}
+
+/** Compara todas las líneas importadas de dos Estados de Situación Financiera. */
+export function reporteSituacionComparativaDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+  const filasAnteriores = new Map<string, SituacionPeriodo["filas"]>();
+  for (const fila of anterior?.filas ?? []) {
+    const clave = claveConcepto(fila.concepto);
+    filasAnteriores.set(clave, [...(filasAnteriores.get(clave) ?? []), fila]);
+  }
+
+  const filas: FilaReporte[] = actual.filas.map(fila => {
+    const clave = claveConcepto(fila.concepto);
+    const coincidencias = filasAnteriores.get(clave) ?? [];
+    const filaAnterior = coincidencias.shift();
+    if (coincidencias.length) filasAnteriores.set(clave, coincidencias); else filasAnteriores.delete(clave);
+    return filaComparativa(fila.concepto, fila.saldoFinal, filaAnterior?.saldoFinal ?? 0, { esTotal: fila.esTotal || filaAnterior?.esTotal });
+  });
+
+  for (const pendientes of filasAnteriores.values()) {
+    for (const fila of pendientes) filas.push(filaComparativa(fila.concepto, 0, fila.saldoFinal, { esTotal: fila.esTotal }));
+  }
+
+  const meta = catalogoReportes.find(item => item.tipo === "situacion-comparativa")!;
+  return {
+    tipo: "situacion-comparativa", titulo: meta.titulo, descripcion: meta.descripcion,
+    periodo: Number(actual.periodo.slice(0, 4)), periodoComparativo: anterior ? Number(anterior.periodo.slice(0, 4)) : undefined,
+    periodoFuente: actual.periodo, periodoComparativoFuente: anterior?.periodo,
+    moneda: "NIO", fuente: `Estados de Situación Financiera ${actual.periodo} y ${anterior?.periodo ?? etiquetaComparativa}`,
     columnas: ["Concepto", etiqueta, etiquetaComparativa, "Variación"], filas, generadoEn: new Date().toISOString(),
   };
 }
@@ -121,13 +205,16 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
 
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
-  if (tipo === "flujo-efectivo") {
+  if (tipo === "flujo-efectivo" || tipo === "situacion-comparativa") {
     const periodoActual = periodoBalanza(granularidad, periodo), periodoAnterior = periodoBalanza(granularidad, comparar);
     const actual = await obtenerSituacionFinanciera(db, periodoActual);
     if (!actual) throw new Error(`No hay Estado de Situación Financiera importado para ${periodoActual}`);
     const anterior = await obtenerSituacionFinanciera(db, periodoAnterior);
     if (!anterior) throw new Error(`No hay Estado de Situación Financiera importado para el período comparativo ${periodoAnterior}`);
-    return { ...reporteFlujoDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta), granularidad, periodoEtiqueta: actualDatos.etiqueta, comparativoEtiqueta: anteriorDatos.etiqueta };
+    const reporte = tipo === "flujo-efectivo"
+      ? reporteFlujoDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta)
+      : reporteSituacionComparativaDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta);
+    return { ...reporte, granularidad, periodoEtiqueta: actualDatos.etiqueta, comparativoEtiqueta: anteriorDatos.etiqueta };
   }
   const actual = await obtenerBalanza(db, periodoBalanza(granularidad, periodo));
   if (!actual) throw new Error(`No hay balanza importada para ${periodoBalanza(granularidad, periodo)}`);

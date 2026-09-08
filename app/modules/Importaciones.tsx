@@ -184,7 +184,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
         <form className="panel formPanel importPanel" onSubmit={importarCatalogo}>
           <div className="panelHead compact">
             <div>
-              <h2>Importar catalogo contable</h2>
+              <h2>Importar catálogo contable</h2>
               <p>Formato esperado: Codigo/Cuenta y Descripcion/Nombre. Opcionales: Nivel, Padre, Naturaleza, Flujo, Movimiento y Estado.</p>
             </div>
           </div>

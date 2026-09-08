@@ -48,7 +48,14 @@ export function extraerFilasSituacionFinanciera(rows: SheetRow[]): SituacionFina
 
   const filas = rows.slice(encabezadoFila + 1).flatMap((fila, index) => {
     const concepto = String(fila[descripcionColumna] ?? "").trim();
-    const saldoFinal = monto(fila[saldoColumna.columna]);
+    const esExcedente = /^excedente ingresos s\/egresos (acumulados|del ejercicio)$/i.test(normalizar(concepto));
+    let saldoFinal = monto(fila[saldoColumna.columna]);
+    // El formato fuente coloca estos dos importes auxiliares fuera de la columna combinada J:K.
+    // Se conservan porque el flujo anual los necesita expresamente para el traspaso de resultados.
+    if (!Number.isFinite(saldoFinal) && esExcedente) {
+      const valorAuxiliar = fila.slice(descripcionColumna + 1).map(monto).find(Number.isFinite);
+      saldoFinal = valorAuxiliar ?? Number.NaN;
+    }
     if (!concepto || !Number.isFinite(saldoFinal)) return [];
     return [{
       numeroLinea: encabezadoFila + index + 2,
