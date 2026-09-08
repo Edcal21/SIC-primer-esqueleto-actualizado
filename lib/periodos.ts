@@ -21,6 +21,14 @@ export function periodoDeFecha(fecha: string): string {
   return periodo;
 }
 
+export function periodoAnterior(periodo: string): string {
+  if (!esPeriodoValido(periodo)) throw new Error(`Período inválido para determinar el período anterior: "${periodo}"`);
+  const [anioTexto, mesTexto] = periodo.split("-");
+  const anio = Number(anioTexto);
+  const mes = Number(mesTexto);
+  return mes === 1 ? `${anio - 1}-12` : `${anio}-${String(mes - 1).padStart(2, "0")}`;
+}
+
 /** Períodos distintos que toca un conjunto de fechas, ordenados y sin repetir. */
 export function periodosDeFechas(fechas: (string | null | undefined)[]): string[] {
   const periodos = new Set<string>();
@@ -80,6 +88,16 @@ export async function verificarPeriodosAbiertos(db: Db, fechas: (string | null |
 }
 
 export type ImpedimentoCierre = { motivo: string; detalle: string };
+
+export async function validarCierreSecuencial(db: Db, periodo: string): Promise<ImpedimentoCierre | null> {
+  const anterior = periodoAnterior(periodo);
+  const filaAnterior = await obtenerPeriodo(db, anterior);
+  if (filaAnterior?.estado === "cerrado") return null;
+  return {
+    motivo: "Período anterior sin cerrar",
+    detalle: `Antes de cerrar ${periodo}, debe cerrar el período contable anterior ${anterior}.`,
+  };
+}
 
 /**
  * Razones por las que un período todavía no puede cerrarse. Se devuelven todas juntas para que el

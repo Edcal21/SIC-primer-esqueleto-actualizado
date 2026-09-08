@@ -11,8 +11,10 @@ import {
   cerrarPeriodo,
   impedimentosParaCerrar,
   obtenerPeriodo,
+  periodoAnterior,
   primerPeriodoCerrado,
   reabrirPeriodo,
+  validarCierreSecuencial,
   verificarPeriodosAbiertos,
 } from "../lib/periodos.ts";
 
@@ -81,6 +83,17 @@ test("una operación que cruza meses se bloquea si cualquiera de ellos está cer
   const bloqueo = await verificarPeriodosAbiertos(db, ["2026-03-25", "2026-04-05"]);
   assert.ok(bloqueo, "basta con que un mes esté cerrado");
   assert.equal(bloqueo.periodo, CERRADO);
+});
+
+test("el cierre contable exige cerrar primero el período anterior", async () => {
+  assert.equal(periodoAnterior("2026-01"), "2025-12");
+  assert.equal(periodoAnterior("2026-04"), "2026-03");
+  assert.equal(await validarCierreSecuencial(db, ABIERTO), null, "marzo cerrado permite cerrar abril");
+
+  const bloqueo = await validarCierreSecuencial(db, CON_PENDIENTES);
+  assert.ok(bloqueo, "mayo no puede cerrar si abril sigue abierto");
+  assert.equal(bloqueo.motivo, "Período anterior sin cerrar");
+  assert.match(bloqueo.detalle, /2026-04/);
 });
 
 test("no se puede cerrar un período con conciliaciones en borrador o rechazadas", async () => {
