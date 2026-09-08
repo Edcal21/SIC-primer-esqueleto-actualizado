@@ -22,6 +22,7 @@ export const formatearMoneda = (valor: number, moneda: "USD" | "NIO") => formato
 export type ReporteDisponible = { id: string; nombre: string; cuentaBancariaNumero: string | null; periodoInicio: string | null; periodoFin: string | null; totalLineas: number };
 export type Evento = { fecha: string; usuario: string; accion: string; resultado: string; detalle?: string | null };
 export type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; totalLineas: number; totalDebe: string; totalHaber: string; creadoEn: string };
+export type ImportacionSituacionFinanciera = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "error"; totalLineas: number; creadoEn: string };
 export type PermisoAdmin = { id: Permiso; descripcion: string };
 export type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
 export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
@@ -51,7 +52,7 @@ export const etiquetasPermiso: Record<Permiso, string> = {
   "banco:ver": "Ver bancos",
   "banco:cargar": "Cargar reportes bancarios",
   "conciliacion:aprobar": "Aprobar conciliación",
-  "importaciones:administrar": "Importar balanza",
+  "importaciones:administrar": "Importar estados financieros",
   "reportes:ver": "Ver reportes",
   "reportes:descargar": "Descargar reportes",
   "auditoria:ver": "Ver auditoría",
@@ -80,7 +81,7 @@ export const menuGroups = [
 export const defaultConfig: ConfiguracionSistema = { institucionNombre: "Universal Nicaragua", sistemaNombre: "SIC", sistemaDescripcion: "Sistema de Información Contable", moneda: "NIO", logoLogin: "/universal-nicaragua-login.png" };
 
 export const opcionesReportesIniciales:OpcionReporte[]=[
-  {tipo:"flujo-efectivo",titulo:"Estado de flujo de efectivo",descripcion:"Operación, inversión y financiamiento.",icono:"bank"},
+  {tipo:"flujo-efectivo",titulo:"Estado de flujo de efectivo",descripcion:"Compara saldos finales del Estado de Situación Financiera.",icono:"bank"},
   {tipo:"balanza-anual",titulo:"Balanza de comprobación anual",descripcion:"Saldos deudores y acreedores.",icono:"catalog"},
   {tipo:"cambio-patrimonio",titulo:"Estado de cambio en el patrimonio",descripcion:"Variaciones del patrimonio institucional.",icono:"dashboard"},
   {tipo:"situacion-comparativa",titulo:"Estado de situación comparativo",descripcion:"Activos, pasivos y patrimonio.",icono:"reports"},
@@ -89,5 +90,15 @@ export const opcionesReportesIniciales:OpcionReporte[]=[
 export const dinero=new Intl.NumberFormat("es-NI",{style:"currency",currency:"NIO",minimumFractionDigits:2});
 export const currentYear = () => new Date().getFullYear();
 export const currentMonth = () => new Date().toLocaleDateString("en-CA").slice(0, 7);
+export function periodoAnterior(value: string, granularidad: Granularidad) {
+  if (granularidad === "anio") return String(Number(value) - 1);
+  if (granularidad === "trimestre") {
+    const [yearText, quarterText] = value.split("-T"), year = Number(yearText), quarter = Number(quarterText);
+    return quarter === 1 ? `${year - 1}-T4` : `${year}-T${quarter - 1}`;
+  }
+  const date = granularidad === "mes" ? new Date(`${value}-01T00:00:00Z`) : new Date(`${value}T00:00:00Z`);
+  if (granularidad === "mes") date.setUTCMonth(date.getUTCMonth() - 1); else date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, granularidad === "mes" ? 7 : 10);
+}
 export const estadoImportacion = (estado: ImportacionBalanza["estado"]) => estado === "procesado" ? "Procesado" : estado === "con_diferencias" ? "Con diferencias" : "Error";
 export const statusClass = (estado: string) => estado === "con_diferencias" || estado === "pendiente" ? "status pending" : estado === "error" ? "status danger" : "status done";

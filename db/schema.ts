@@ -196,6 +196,40 @@ export const lineasBalanza = pgTable("lineas_balanza", {
   check("ck_lineas_balanza_montos", sql`${table.debe} >= 0 and ${table.haber} >= 0`),
 ]);
 
+/** Importaciones mensuales del Estado de Situación Financiera. Se mantienen separadas de la
+ * balanza porque este documento no contiene códigos, débitos ni créditos; su dato comparable es
+ * el Saldo Final de cada concepto. */
+export const importacionesSituacionFinanciera = pgTable("importaciones_situacion_financiera", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  archivoNombre: text("archivo_nombre").notNull(),
+  archivoTamano: integer("archivo_tamano").notNull(),
+  periodo: varchar("periodo", { length: 7 }).notNull(),
+  estado: varchar("estado", { length: 10, enum: ["procesado", "error"] }).notNull().default("procesado"),
+  totalLineas: integer("total_lineas").notNull().default(0),
+  importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_importaciones_situacion_periodo").on(table.periodo),
+  index("idx_importaciones_situacion_usuario").on(table.importadoPor),
+  check("ck_importaciones_situacion_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("ck_importaciones_situacion_estado", sql`${table.estado} in ('procesado', 'error')`),
+  check("ck_importaciones_situacion_lineas", sql`${table.totalLineas} >= 0`),
+]);
+
+export const lineasSituacionFinanciera = pgTable("lineas_situacion_financiera", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  importacionId: uuid("importacion_id").notNull().references(() => importacionesSituacionFinanciera.id, { onDelete: "cascade" }),
+  numeroLinea: integer("numero_linea").notNull(),
+  concepto: text("concepto").notNull(),
+  saldoFinal: numeric("saldo_final", { precision: 18, scale: 2 }).notNull(),
+  esTotal: boolean("es_total").notNull().default(false),
+}, (table) => [
+  index("idx_lineas_situacion_importacion").on(table.importacionId),
+  index("idx_lineas_situacion_concepto").on(table.concepto),
+  check("ck_lineas_situacion_numero", sql`${table.numeroLinea} > 0`),
+  check("ck_lineas_situacion_concepto", sql`length(trim(${table.concepto})) > 0`),
+]);
+
 export const auditoriaEventos = pgTable("auditoria_eventos", {
   id: uuid("id").primaryKey().defaultRandom(),
   usuarioId: varchar("usuario_id", { length: 40 }).references(() => usuarios.id),

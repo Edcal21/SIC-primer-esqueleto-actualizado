@@ -1,6 +1,6 @@
 import { asc, desc, eq } from "drizzle-orm";
 import type { getDb } from "../db";
-import { importacionesBalanza, lineasBalanza, reportesCatalogo } from "../db/schema";
+import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, lineasSituacionFinanciera, reportesCatalogo } from "../db/schema";
 
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
@@ -8,10 +8,11 @@ export type FilaReporte = { concepto: string; codigo?: string; actual: number; a
 export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string };
 type Db = ReturnType<typeof getDb>;
 type BalanzaPeriodo = { periodo: string; filas: { codigo: string; concepto: string; debe: number; haber: number; saldo: number }[] };
+type SituacionPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
 const filaComparativa = (concepto:string, actual:number, anterior:number, extra:Partial<FilaReporte>={}):FilaReporte => ({ concepto, actual, anterior, variacion:actual-anterior, ...extra });
 
 export const catalogoReportes: { tipo: TipoReporte; titulo: string; descripcion: string }[] = [
-  { tipo:"flujo-efectivo", titulo:"Estado de flujo de efectivo", descripcion:"Entradas y salidas clasificadas por operación, inversión y financiamiento." },
+  { tipo:"flujo-efectivo", titulo:"Estado de flujo de efectivo", descripcion:"Compara el Saldo Final del Estado de Situación Financiera entre períodos." },
   { tipo:"balanza-anual", titulo:"Balanza de comprobación anual", descripcion:"Saldos deudores y acreedores acumulados del período." },
   { tipo:"cambio-patrimonio", titulo:"Estado de cambio en el patrimonio", descripcion:"Movimientos que explican la variación del patrimonio institucional." },
   { tipo:"situacion-comparativa", titulo:"Estado de situación comparativo", descripcion:"Activos, pasivos y patrimonio comparados entre dos períodos." },
@@ -52,6 +53,45 @@ async function obtenerBalanza(db: Db, periodo: string): Promise<BalanzaPeriodo |
   return { periodo: importacion.periodo, filas: filas.map(fila => ({ codigo: fila.cuentaCodigo, concepto: fila.cuentaNombre, debe: Number(fila.debe), haber: Number(fila.haber), saldo: Number(fila.saldo) })) };
 }
 
+async function obtenerSituacionFinanciera(db: Db, periodo: string): Promise<SituacionPeriodo | null> {
+  const [importacion] = await db.select().from(importacionesSituacionFinanciera)
+    .where(eq(importacionesSituacionFinanciera.periodo, periodo))
+    .orderBy(desc(importacionesSituacionFinanciera.creadoEn)).limit(1);
+  if (!importacion) return null;
+  const filas = await db.select().from(lineasSituacionFinanciera)
+    .where(eq(lineasSituacionFinanciera.importacionId, importacion.id))
+    .orderBy(asc(lineasSituacionFinanciera.numeroLinea));
+  return { periodo: importacion.periodo, filas: filas.map(fila => ({ concepto: fila.concepto, saldoFinal: Number(fila.saldoFinal), esTotal: fila.esTotal })) };
+}
+
+const claveConcepto = (concepto: string) => concepto.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
+
+/** Compara exclusivamente el Saldo Final de dos Estados de Situación Financiera. */
+export function reporteFlujoDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+  const anteriores = new Map<string, number[]>();
+  for (const fila of anterior?.filas ?? []) {
+    const key = claveConcepto(fila.concepto), valores = anteriores.get(key) ?? [];
+    valores.push(fila.saldoFinal); anteriores.set(key, valores);
+  }
+  const filas = actual.filas.map(fila => {
+    const previos = anteriores.get(claveConcepto(fila.concepto));
+    const saldoAnterior = previos?.shift() ?? 0;
+    return filaComparativa(fila.concepto, fila.saldoFinal, saldoAnterior, { esTotal: fila.esTotal });
+  });
+  const efectivoActual = actual.filas.find(fila => claveConcepto(fila.concepto) === "total efectivo")?.saldoFinal;
+  const efectivoAnterior = anterior?.filas.find(fila => claveConcepto(fila.concepto) === "total efectivo")?.saldoFinal;
+  if (efectivoActual !== undefined) {
+    filas.push(filaComparativa("Variación neta de efectivo", efectivoActual, efectivoAnterior ?? 0, { esTotal: true }));
+  }
+  const meta = catalogoReportes.find(item => item.tipo === "flujo-efectivo")!;
+  return {
+    tipo: "flujo-efectivo", titulo: meta.titulo, descripcion: meta.descripcion,
+    periodo: Number(actual.periodo.slice(0, 4)), periodoComparativo: anterior ? Number(anterior.periodo.slice(0, 4)) : undefined,
+    moneda: "NIO", fuente: `Estado de Situación Financiera ${actual.periodo}`,
+    columnas: ["Concepto", etiqueta, etiquetaComparativa, "Variación"], filas, generadoEn: new Date().toISOString(),
+  };
+}
+
 function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
   const meta = catalogoReportes.find(item => item.tipo === tipo)!;
   if (tipo === "balanza-anual") {
@@ -81,6 +121,14 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
 
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
+  if (tipo === "flujo-efectivo") {
+    const periodoActual = periodoBalanza(granularidad, periodo), periodoAnterior = periodoBalanza(granularidad, comparar);
+    const actual = await obtenerSituacionFinanciera(db, periodoActual);
+    if (!actual) throw new Error(`No hay Estado de Situación Financiera importado para ${periodoActual}`);
+    const anterior = await obtenerSituacionFinanciera(db, periodoAnterior);
+    if (!anterior) throw new Error(`No hay Estado de Situación Financiera importado para el período comparativo ${periodoAnterior}`);
+    return { ...reporteFlujoDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta), granularidad, periodoEtiqueta: actualDatos.etiqueta, comparativoEtiqueta: anteriorDatos.etiqueta };
+  }
   const actual = await obtenerBalanza(db, periodoBalanza(granularidad, periodo));
   if (!actual) throw new Error(`No hay balanza importada para ${periodoBalanza(granularidad, periodo)}`);
   const anterior = await obtenerBalanza(db, periodoBalanza(granularidad, comparar));
