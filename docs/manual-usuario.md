@@ -1454,7 +1454,9 @@ El respaldo de la base de datos **no es un botón dentro del SIC**. Es un proces
 
 Debajo del estado hay una tabla con el historial: fecha, si fue automático o manual, si terminó correcto, el tamaño del archivo, y si además se copió a un destino externo.
 
-> **Esta pantalla no genera respaldos ni permite descargarlos.** Solo informa. Generar uno fuera de horario, o restaurar uno, son tareas técnicas que se hacen directamente en el servidor — ver 15.3 y 15.4.
+**Botón "Generar respaldo ahora".** El Administrador puede pedir un respaldo fuera del horario nocturno habitual, sin esperar a la próxima medianoche. El botón no genera el respaldo al instante: dentro del SIC no es técnicamente posible ejecutarlo directamente. Lo que hace es dejar la solicitud pedida, y el servidor la atiende en su próxima corrida programada (pensada para cada pocos minutos — ver 15.3). Mientras la solicitud está pendiente, la pantalla muestra un aviso ("Solicitud de respaldo enviada por…, en espera de que el servidor la genere") y el botón queda deshabilitado, para que dos administradores no encolen dos respaldos a la vez. Si la solicitud lleva más de 10 minutos sin atenderse, el aviso cambia de tono y sugiere verificar que el proceso corto esté programado en el servidor.
+
+> **Esta pantalla no genera respaldos por sí sola ni permite descargarlos.** Solo informa y, con el botón, solicita. Restaurar un respaldo es una tarea técnica que se hace directamente en el servidor — ver 15.4.
 
 ### 15.3 Para el responsable técnico: instalación
 
@@ -1476,11 +1478,15 @@ Dos archivos, ambos en `scripts/` del proyecto:
    ```
    0 1 * * * DATABASE_URL="postgresql://usuario:contraseña@localhost:5432/sic" /ruta/a/respaldo-postgresql.sh >> /var/log/sic-respaldo.log 2>&1
    ```
-4. **Configure un destino secundario.** Un respaldo que vive solo en el mismo servidor no protege contra que ese servidor falle. Defina `SIC_RESPALDOS_DESTINO_SECUNDARIO` apuntando a una unidad de red, un disco externo, o una carpeta sincronizada a otro sitio:
+4. **Programe también el proceso corto que atiende el botón "Generar respaldo ahora"** (ver 15.2), cada pocos minutos. Cuando no hay ninguna solicitud pendiente termina de inmediato, sin respaldar nada, así que no tiene costo dejarlo corriendo seguido:
+   ```
+   */5 * * * * DATABASE_URL="postgresql://usuario:contraseña@localhost:5432/sic" /ruta/a/respaldo-postgresql.sh --atender-solicitudes >> /var/log/sic-respaldo-solicitudes.log 2>&1
+   ```
+5. **Configure un destino secundario.** Un respaldo que vive solo en el mismo servidor no protege contra que ese servidor falle. Defina `SIC_RESPALDOS_DESTINO_SECUNDARIO` apuntando a una unidad de red, un disco externo, o una carpeta sincronizada a otro sitio:
    ```
    SIC_RESPALDOS_DESTINO_SECUNDARIO="/mnt/respaldo-externo/sic"
    ```
-5. Verifique que corrió: `Configuración → Respaldo de la base de datos` debe mostrar **Al día** al día siguiente.
+6. Verifique que corrió: `Configuración → Respaldo de la base de datos` debe mostrar **Al día** al día siguiente.
 
 **Variables de entorno que acepta el script** (todas opcionales salvo `DATABASE_URL`):
 

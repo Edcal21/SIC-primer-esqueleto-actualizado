@@ -424,3 +424,23 @@ export const respaldosSistema = pgTable("respaldos_sistema", {
   check("ck_respaldos_sistema_estado", sql`${table.estado} in ('correcto', 'error')`),
   check("ck_respaldos_sistema_modo", sql`${table.modo} in ('programado', 'manual')`),
 ]);
+
+/**
+ * Cola del botón "Generar respaldo ahora". La aplicación solo puede insertar una fila
+ * aquí — no puede ejecutar pg_dump por sí misma. Un cron corto en el servidor (cada
+ * pocos minutos, ver scripts/respaldo-postgresql.sh --atender-solicitudes) revisa esta
+ * tabla y, si encuentra una solicitud pendiente, genera el respaldo y la marca resuelta,
+ * enlazándola con la fila que quedó en respaldos_sistema.
+ */
+export const respaldosSolicitudes = pgTable("respaldos_solicitudes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  solicitadoPor: varchar("solicitado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  solicitadoPorNombre: text("solicitado_por_nombre").notNull(),
+  solicitadoEn: timestamp("solicitado_en", { withTimezone: true }).notNull().defaultNow(),
+  estado: varchar("estado", { length: 12, enum: ["pendiente", "completado", "error"] }).notNull().default("pendiente"),
+  atendidoEn: timestamp("atendido_en", { withTimezone: true }),
+  respaldoId: uuid("respaldo_id").references(() => respaldosSistema.id),
+}, (table) => [
+  index("idx_respaldos_solicitudes_estado").on(table.estado),
+  check("ck_respaldos_solicitudes_estado", sql`${table.estado} in ('pendiente', 'completado', 'error')`),
+]);

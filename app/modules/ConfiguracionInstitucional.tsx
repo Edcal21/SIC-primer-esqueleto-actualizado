@@ -24,6 +24,7 @@ export default function ConfiguracionInstitucional({ config, onSaved, notify }: 
   const [savingTasa, setSavingTasa] = useState(false);
   const [respaldos, setRespaldos] = useState<EstadoRespaldos | null>(null);
   const [respaldosError, setRespaldosError] = useState("");
+  const [solicitandoRespaldo, setSolicitandoRespaldo] = useState(false);
 
   async function cargarRespaldos() {
     try {
@@ -32,6 +33,21 @@ export default function ConfiguracionInstitucional({ config, onSaved, notify }: 
       if (response.ok) setRespaldos(data);
       else setRespaldosError(data.error ?? "No se pudo consultar el estado de los respaldos");
     } catch { setRespaldosError("No se pudo conectar con el servicio de respaldos"); }
+  }
+
+  /** No ejecuta el respaldo: solo deja la solicitud pedida. El servidor la atiende en su
+   *  próxima corrida programada (cada pocos minutos) — ver capítulo 15 del manual. */
+  async function solicitarRespaldo() {
+    setSolicitandoRespaldo(true); setRespaldosError("");
+    try {
+      const response = await fetch("/api/respaldos", { method: "POST" });
+      const data = await response.json().catch(() => ({})) as { creada?: boolean; error?: string };
+      if (!response.ok) return setRespaldosError(data.error ?? "No se pudo solicitar el respaldo");
+      await cargarRespaldos();
+      notify(data.creada ? "Respaldo solicitado. El servidor lo generará en los próximos minutos." : "Ya había una solicitud de respaldo pendiente.");
+    } catch {
+      setRespaldosError("No se pudo conectar con el servicio de respaldos");
+    } finally { setSolicitandoRespaldo(false); }
   }
 
   async function cargarTasas() {
@@ -121,13 +137,23 @@ export default function ConfiguracionInstitucional({ config, onSaved, notify }: 
     </section>
 
     <section className="panel formPanel">
-      <div className="panelHead compact"><div><h2>Respaldo de la base de datos</h2><p>El respaldo corre automáticamente todas las noches en el servidor. Esta pantalla solo muestra si está corriendo bien — no genera ni descarga nada desde aquí.</p></div></div>
+      <div className="panelHead compact">
+        <div><h2>Respaldo de la base de datos</h2><p>El respaldo corre automáticamente todas las noches en el servidor. Esta pantalla no lo genera directamente: el botón deja pedido un respaldo, y el servidor lo produce en su próxima corrida.</p></div>
+        <button className="secondary" type="button" onClick={solicitarRespaldo} disabled={solicitandoRespaldo || Boolean(respaldos?.solicitudPendiente)}>
+          {solicitandoRespaldo ? "Solicitando…" : respaldos?.solicitudPendiente ? "Solicitud en curso…" : "Generar respaldo ahora"}
+        </button>
+      </div>
       {respaldosError ? <div className="authError adminError">{respaldosError}</div> : null}
       {respaldos ? <>
         <div className="accountHint"><MenuIcon name={respaldos.salud === "al_dia" ? "check" : "info"} className="glyphIcon"/><span>
           <span className={CLASE_SALUD[respaldos.salud]} style={{ marginRight: 8 }}>{ETIQUETA_SALUD[respaldos.salud]}</span>
           {respaldos.mensaje}
         </span></div>
+        {respaldos.solicitudPendiente ? <div className={respaldos.solicitudPendiente.demorada ? "authError adminError" : "readOnlyBanner"}>
+          {respaldos.solicitudPendiente.demorada
+            ? `Hay una solicitud de respaldo pendiente desde hace ${respaldos.solicitudPendiente.minutosPendiente} minutos sin atenderse. Verifique que "respaldo-postgresql.sh --atender-solicitudes" esté programado en el servidor.`
+            : `Solicitud de respaldo enviada por ${respaldos.solicitudPendiente.solicitadoPorNombre}, en espera de que el servidor la genere.`}
+        </div> : null}
         {respaldos.recientes.length ? <div className="tableWrap"><table><thead><tr><th>FECHA</th><th>MODO</th><th>ESTADO</th><th>TAMAÑO</th><th>COPIA EXTERNA</th></tr></thead><tbody>{respaldos.recientes.map(evento => <tr key={evento.id}>
           <td><b>{new Date(evento.iniciadoEn).toLocaleString("es-NI")}</b></td>
           <td>{evento.modo === "programado" ? "Programado" : "Manual"}</td>

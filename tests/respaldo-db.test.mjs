@@ -2,10 +2,11 @@
 // SIC_TEST_DATABASE_URL apuntando a una base desechable ya migrada (ver `pnpm test:db`).
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
+import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "../db/schema.ts";
-import { obtenerEstadoRespaldos } from "../lib/respaldo.ts";
+import { obtenerEstadoRespaldos, solicitarRespaldo } from "../lib/respaldo.ts";
 
 if (!process.env.SIC_TEST_DATABASE_URL) throw new Error("Configure SIC_TEST_DATABASE_URL con una BD desechable migrada");
 process.env.DATABASE_URL = process.env.SIC_TEST_DATABASE_URL;
@@ -14,8 +15,12 @@ const client = postgres(process.env.DATABASE_URL, { max: 1 });
 const db = drizzle(client, { schema });
 
 async function limpiar() {
+  // respaldos_solicitudes referencia respaldos_sistema (respaldo_id): se borra primero.
+  await db.delete(schema.respaldosSolicitudes);
   await db.delete(schema.respaldosSistema);
 }
+
+const ADMIN = { id: "usr-admin", nombre: "Administrador del Sistema" };
 
 const horasAtras = (horas) => new Date(Date.now() - horas * 3_600_000);
 
@@ -92,4 +97,61 @@ test("devuelve como máximo los 20 eventos más recientes, ordenados del más nu
   assert.equal(estado.recientes.length, 20);
   assert.equal(estado.recientes[0].archivo, "sic-0.dump");
   assert.ok(estado.recientes[0].iniciadoEn.getTime() > estado.recientes[1].iniciadoEn.getTime());
+});
+
+// --- Botón "Generar respaldo ahora" ---
+
+test("solicitarRespaldo crea una fila pendiente", async () => {
+  await limpiar();
+  const resultado = await solicitarRespaldo(db, ADMIN);
+  assert.equal(resultado.creada, true);
+  assert.equal(resultado.solicitud.estado, "pendiente");
+  assert.equal(resultado.solicitud.solicitadoPor, ADMIN.id);
+});
+
+test("solicitarRespaldo es idempotente: un segundo pedido con una solicitud ya pendiente no crea otra fila", async () => {
+  await limpiar();
+  const primera = await solicitarRespaldo(db, ADMIN);
+  const segunda = await solicitarRespaldo(db, ADMIN);
+  assert.equal(segunda.creada, false);
+  assert.equal(segunda.solicitud.id, primera.solicitud.id, "debe devolver la misma solicitud, no crear una nueva");
+  const total = await db.select().from(schema.respaldosSolicitudes);
+  assert.equal(total.length, 1);
+});
+
+test("una vez que la solicitud pendiente se resuelve, un nuevo pedido sí crea una fila nueva", async () => {
+  await limpiar();
+  const primera = await solicitarRespaldo(db, ADMIN);
+  await db.update(schema.respaldosSolicitudes).set({ estado: "completado", atendidoEn: new Date() }).where(eq(schema.respaldosSolicitudes.id, primera.solicitud.id));
+  const segunda = await solicitarRespaldo(db, ADMIN);
+  assert.equal(segunda.creada, true);
+  assert.notEqual(segunda.solicitud.id, primera.solicitud.id);
+});
+
+test("obtenerEstadoRespaldos expone la solicitud pendiente con los minutos transcurridos", async () => {
+  await limpiar();
+  const [solicitud] = await db.insert(schema.respaldosSolicitudes).values({
+    solicitadoPor: ADMIN.id, solicitadoPorNombre: ADMIN.nombre, solicitadoEn: horasAtras(0.25),
+  }).returning();
+  const estado = await obtenerEstadoRespaldos(db);
+  assert.ok(estado.solicitudPendiente);
+  assert.equal(estado.solicitudPendiente.id, solicitud.id);
+  assert.ok(estado.solicitudPendiente.minutosPendiente >= 14 && estado.solicitudPendiente.minutosPendiente <= 16, `esperaba ~15 minutos, obtuve ${estado.solicitudPendiente.minutosPendiente}`);
+  assert.equal(estado.solicitudPendiente.demorada, true, "15 minutos ya supera el umbral de demora (10)");
+});
+
+test("una solicitud pendiente reciente no se marca como demorada", async () => {
+  await limpiar();
+  await db.insert(schema.respaldosSolicitudes).values({ solicitadoPor: ADMIN.id, solicitadoPorNombre: ADMIN.nombre, solicitadoEn: new Date() });
+  const estado = await obtenerEstadoRespaldos(db);
+  assert.equal(estado.solicitudPendiente.demorada, false);
+});
+
+test("una solicitud ya completada no aparece como pendiente", async () => {
+  await limpiar();
+  await db.insert(schema.respaldosSolicitudes).values({
+    solicitadoPor: ADMIN.id, solicitadoPorNombre: ADMIN.nombre, estado: "completado", atendidoEn: new Date(),
+  });
+  const estado = await obtenerEstadoRespaldos(db);
+  assert.equal(estado.solicitudPendiente, null);
 });
