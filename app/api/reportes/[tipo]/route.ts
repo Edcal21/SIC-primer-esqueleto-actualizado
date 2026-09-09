@@ -2,6 +2,7 @@ import { getDb } from "../../../../db";
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { exportarFlujoExcel } from "../../../../lib/flujo-excel";
+import { exportarCambioPatrimonioExcel } from "../../../../lib/patrimonio-excel";
 import { esTipoReporte, generarReportePorPeriodoDesdeDb, reporteCsv, type Granularidad } from "../../../../lib/reportes";
 
 export async function GET(request: Request, { params }: { params: Promise<{ tipo: string }> }) {
@@ -33,15 +34,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ tipo
         "Content-Disposition": `attachment; filename="${tipo}-${periodo}.csv"`,
       } });
     }
-    if (tipo !== "flujo-efectivo") return jsonError("La exportación Excel está disponible para el flujo de efectivo", 400);
-    const plantillaResponse = await fetch(new URL("/plantillas/flujo-efectivo.xlsx", request.url));
-    if (!plantillaResponse.ok) throw new Error("No se pudo cargar la plantilla de flujo de efectivo");
-    const archivo = exportarFlujoExcel(reporte, await plantillaResponse.arrayBuffer());
+    if (tipo !== "flujo-efectivo" && tipo !== "cambio-patrimonio") return jsonError("La exportación Excel no está disponible para este reporte", 400);
+    const esPatrimonio = tipo === "cambio-patrimonio";
+    const plantillaNombre = esPatrimonio ? "cambio-patrimonio.xlsx" : "flujo-efectivo.xlsx";
+    const plantillaResponse = await fetch(new URL(`/plantillas/${plantillaNombre}`, request.url));
+    if (!plantillaResponse.ok) throw new Error(`No se pudo cargar la plantilla de ${esPatrimonio ? "cambio en el patrimonio" : "flujo de efectivo"}`);
+    const plantilla = await plantillaResponse.arrayBuffer();
+    const archivo = esPatrimonio ? exportarCambioPatrimonioExcel(reporte, plantilla) : exportarFlujoExcel(reporte, plantilla);
     const cuerpo = new ArrayBuffer(archivo.byteLength);
     new Uint8Array(cuerpo).set(archivo);
     return new Response(cuerpo, { headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="flujo-efectivo-${reporte.periodoFuente ?? periodo}.xlsx"`,
+      "Content-Disposition": `attachment; filename="${tipo}-${reporte.periodoFuente ?? periodo}.xlsx"`,
       "Cache-Control": "no-store",
     } });
   } catch (error) {

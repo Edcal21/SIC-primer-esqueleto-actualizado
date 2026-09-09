@@ -190,6 +190,78 @@ test("los reportes comparativos desde balanza no suman cuentas padre e hijas dos
   assert.equal(patrimonio.filas.some(item => item.codigo?.startsWith("1") || item.codigo?.startsWith("2")), false);
 });
 
+test("el cambio en el patrimonio anual aplica traslado, IR y utilidad con los signos del formato oficial", async () => {
+  const { reporteCambioPatrimonioDesdeSituaciones } = await import(`../lib/reportes.ts?patrimonio=${Date.now()}`);
+  const anterior = { periodo: "2024-12", filas: [
+    fila("Patrimonio Iglesia Universal del Reino de Dios", 18703328.66),
+    fila("Patrimonio Donado", 144839.20),
+    fila("Utilidades Acumuladas", -13179212.23),
+    fila("Incremento o Decremento por Revaluacion de Activos", 91703581.13),
+    fila("Excedente Ingresos s/Egresos acumulados", -89043.81),
+    fila("Excedente Ingresos s/Egresos del ejercicio", 0),
+    fila("PAGO MINIMO DEFINITIVO", 220200.57),
+    fila("Total PATRIMONIO", 97283492.95),
+  ] };
+  const actual = { periodo: "2025-12", filas: [
+    fila("Patrimonio Iglesia Universal del Reino de Dios", 18703328.66),
+    fila("Patrimonio Donado", 144839.20),
+    fila("Utilidades Acumuladas", -13488456.61),
+    fila("Incremento o Decremento por Revaluacion de Activos", 91703581.13),
+    fila("Excedente Ingresos s/Egresos acumulados", -1505507.75),
+    fila("Excedente Ingresos s/Egresos del ejercicio", 0),
+    fila("Total PATRIMONIO", 95557784.63),
+  ] };
+
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+  assert.deepEqual(reporte.columnas, ["Descripción", "Patrimonio", "Patrimonio donado", "Utilidades acumuladas", "Incremento o decremento por revaluación de activo", "Utilidad ejercicio", "Total patrimonio"]);
+  assert.deepEqual(reporte.filas.map(item => [item.concepto, item.valores]), [
+    ["Saldos al 31/12/2024", [18703328.66, 144839.20, -13179212.23, 91703581.13, -89043.81, 97283492.95]],
+    ["Traslado a utilidades acumuladas/2024", [0, 0, -89043.81, 0, 89043.81, 0]],
+    ["Pago de Impuesto IR 2024", [0, 0, -220200.57, 0, 0, -220200.57]],
+    ["Utilidades del Ejercicio 2025", [0, 0, 0, 0, -1505507.75, -1505507.75]],
+    ["Totales C$", [18703328.66, 144839.20, -13488456.61, 91703581.13, -1505507.75, 95557784.63]],
+  ]);
+  assert.equal(reporte.validacion?.conciliado, true);
+  assert.ok(reporte.validacion?.diferencias.every(item => item.diferencia === 0));
+});
+
+test("el cambio en el patrimonio advierte cuando las operaciones no concilian con el cierre principal", async () => {
+  const { reporteCambioPatrimonioDesdeSituaciones } = await import(`../lib/reportes.ts?patrimonio-diferencia=${Date.now()}`);
+  const anterior = { periodo: "2024-12", filas: [fila("Patrimonio Iglesia Universal del Reino de Dios", 100), fila("Total PATRIMONIO", 100)] };
+  const actual = { periodo: "2025-12", filas: [fila("Patrimonio Iglesia Universal del Reino de Dios", 100), fila("Total PATRIMONIO", 125)] };
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+  assert.equal(reporte.validacion?.conciliado, false);
+  assert.equal(reporte.validacion?.diferencias.find(item => item.concepto === "Total patrimonio")?.diferencia, -25);
+});
+
+test("la exportación Excel del patrimonio mantiene el orden y fórmulas del formato anual", async () => {
+  const { reporteCambioPatrimonioDesdeSituaciones } = await import(`../lib/reportes.ts?patrimonio-xlsx-report=${Date.now()}`);
+  const { exportarCambioPatrimonioExcel } = await import(`../lib/patrimonio-excel.ts?patrimonio-xlsx=${Date.now()}`);
+  const anterior = { periodo: "2024-12", filas: [
+    fila("Patrimonio Iglesia Universal del Reino de Dios", 10), fila("Patrimonio Donado", 20),
+    fila("Utilidades Acumuladas", 30), fila("Incremento o Decremento por Revaluacion de Activos", 40),
+    fila("Excedente Ingresos s/Egresos acumulados", 5), fila("PAGO MINIMO DEFINITIVO", 2), fila("Total PATRIMONIO", 105),
+  ] };
+  const actual = { periodo: "2025-12", filas: [
+    fila("Patrimonio Iglesia Universal del Reino de Dios", 10), fila("Patrimonio Donado", 20),
+    fila("Utilidades Acumuladas", 33), fila("Incremento o Decremento por Revaluacion de Activos", 40),
+    fila("Excedente Ingresos s/Egresos del ejercicio", 7), fila("Total PATRIMONIO", 110),
+  ] };
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+  const plantilla = await readFile(new URL("../public/plantillas/cambio-patrimonio.xlsx", import.meta.url));
+  const bytes = exportarCambioPatrimonioExcel(reporte, plantilla.buffer.slice(plantilla.byteOffset, plantilla.byteOffset + plantilla.byteLength));
+  const workbook = XLSX.read(bytes, { type: "array", cellFormula: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  assert.equal(sheet.A3.v, "Al 31 de Diciembre de 2025");
+  assert.equal(sheet.A8.v, "Traslado a utilidades acumuladas/2024");
+  assert.equal(sheet.D8.v, 5);
+  assert.equal(sheet.F8.v, -5);
+  assert.equal(sheet.D9.v, -2);
+  assert.equal(sheet.G9.f, "SUM(B9:F9)");
+  assert.equal(sheet.B11.f, "SUM(B7:B10)");
+  assert.equal(sheet.G11.f, "SUM(G7:G10)");
+});
+
 test("la exportación Excel conserva la plantilla, las fórmulas y los recursos gráficos", async () => {
   const { reporteFlujoDesdeSituaciones } = await import(`../lib/reportes.ts?xlsx-report=${Date.now()}`);
   const { exportarFlujoExcel } = await import(`../lib/flujo-excel.ts?xlsx=${Date.now()}`);

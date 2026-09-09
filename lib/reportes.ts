@@ -4,8 +4,9 @@ import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, 
 
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
-export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; esTotal?: boolean; esEncabezado?: boolean };
-export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string };
+export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; valores?: number[]; esTotal?: boolean; esEncabezado?: boolean };
+export type ValidacionReporte = { conciliado: boolean; diferencias: { concepto: string; calculado: number; estadoFinanciero: number; diferencia: number }[] };
+export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; validacion?: ValidacionReporte; generadoEn: string };
 type Db = ReturnType<typeof getDb>;
 type BalanzaPeriodo = { periodo: string; filas: { codigo: string; concepto: string; debe: number; haber: number; saldo: number }[] };
 type SituacionPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
@@ -181,6 +182,60 @@ export function reporteSituacionComparativaDesdeSituaciones(actual: SituacionPer
   };
 }
 
+const redondearCentavos = (valor: number) => Math.round((valor + Number.EPSILON) * 100) / 100;
+
+/** Construye el formato anual oficial a partir de dos cierres al 31 de diciembre. */
+export function reporteCambioPatrimonioDesdeSituaciones(actual: SituacionPeriodo, anterior: SituacionPeriodo): ReporteFinanciero {
+  const anioActual = Number(actual.periodo.slice(0, 4));
+  const anioAnterior = Number(anterior.periodo.slice(0, 4));
+  const saldo = (periodo: SituacionPeriodo, ...conceptos: string[]) => redondearCentavos(saldoPorConcepto(periodo, ...conceptos));
+  const patrimonioAnterior = saldo(anterior, "Patrimonio Iglesia Universal del Reino de Dios");
+  const donadoAnterior = saldo(anterior, "Patrimonio Donado");
+  const acumuladasAnterior = saldo(anterior, "Utilidades Acumuladas");
+  const revaluacionAnterior = saldo(anterior, "Incremento o Decremento por Revaluacion de Activos");
+  const utilidadAnterior = redondearCentavos(totalExcedentes(anterior));
+  const impuestoAnterior = -saldo(anterior, "PAGO MINIMO DEFINITIVO");
+  const utilidadActual = redondearCentavos(totalExcedentes(actual));
+
+  const componentesApertura = [patrimonioAnterior, donadoAnterior, acumuladasAnterior, revaluacionAnterior, utilidadAnterior];
+  const apertura = [...componentesApertura, redondearCentavos(sumar(componentesApertura))];
+  const traslado = [0, 0, utilidadAnterior, 0, -utilidadAnterior, 0];
+  const impuesto = [0, 0, impuestoAnterior, 0, 0, impuestoAnterior];
+  const resultado = [0, 0, 0, 0, utilidadActual, utilidadActual];
+  const totales = apertura.map((valor, indice) => redondearCentavos(valor + traslado[indice] + impuesto[indice] + resultado[indice]));
+  const esperados = [
+    saldo(actual, "Patrimonio Iglesia Universal del Reino de Dios"),
+    saldo(actual, "Patrimonio Donado"),
+    saldo(actual, "Utilidades Acumuladas"),
+    saldo(actual, "Incremento o Decremento por Revaluacion de Activos"),
+    utilidadActual,
+    saldo(actual, "Total PATRIMONIO"),
+  ];
+  const conceptosValidacion = ["Patrimonio", "Patrimonio donado", "Utilidades acumuladas", "Revaluación de activos", "Utilidad del ejercicio", "Total patrimonio"];
+  const diferencias = conceptosValidacion.map((concepto, indice) => ({
+    concepto,
+    calculado: totales[indice],
+    estadoFinanciero: esperados[indice],
+    diferencia: redondearCentavos(totales[indice] - esperados[indice]),
+  }));
+  const filas: FilaReporte[] = [
+    { concepto: `Saldos al 31/12/${anioAnterior}`, actual: apertura[0], valores: apertura },
+    { concepto: `Traslado a utilidades acumuladas/${anioAnterior}`, actual: traslado[0], valores: traslado },
+    { concepto: `Pago de Impuesto IR ${anioAnterior}`, actual: impuesto[0], valores: impuesto },
+    { concepto: `Utilidades del Ejercicio ${anioActual}`, actual: resultado[0], valores: resultado },
+    { concepto: "Totales C$", actual: totales[0], valores: totales, esTotal: true },
+  ];
+  const meta = catalogoReportes.find(item => item.tipo === "cambio-patrimonio")!;
+  return {
+    tipo: "cambio-patrimonio", titulo: meta.titulo, descripcion: meta.descripcion,
+    periodo: anioActual, periodoComparativo: anioAnterior,
+    periodoFuente: actual.periodo, periodoComparativoFuente: anterior.periodo,
+    moneda: "NIO", fuente: `Estados de Situación Financiera al 31/12/${anioActual} y 31/12/${anioAnterior}`,
+    columnas: ["Descripción", "Patrimonio", "Patrimonio donado", "Utilidades acumuladas", "Incremento o decremento por revaluación de activo", "Utilidad ejercicio", "Total patrimonio"],
+    filas, validacion: { conciliado: diferencias.every(item => Math.abs(item.diferencia) < 0.01), diferencias }, generadoEn: new Date().toISOString(),
+  };
+}
+
 function esCuentaDetalle(fila: BalanzaPeriodo["filas"][number], filas: BalanzaPeriodo["filas"]) {
   return !filas.some(otra => otra.codigo !== fila.codigo && otra.codigo.startsWith(fila.codigo.replace(/0+$/, "")));
 }
@@ -228,16 +283,20 @@ export function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anteri
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
   if (tipo === "minutas") throw new Error("El reporte de minutas utiliza filtros de iglesia y rango de fechas");
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
-  if (tipo === "flujo-efectivo" || tipo === "situacion-comparativa") {
-    const periodoActual = periodoBalanza(granularidad, periodo), periodoAnterior = periodoBalanza(granularidad, comparar);
+  if (tipo === "flujo-efectivo" || tipo === "situacion-comparativa" || tipo === "cambio-patrimonio") {
+    const esCambioPatrimonio = tipo === "cambio-patrimonio";
+    const periodoActual = esCambioPatrimonio ? `${periodo.slice(0, 4)}-12` : periodoBalanza(granularidad, periodo);
+    const periodoAnterior = esCambioPatrimonio ? `${comparar.slice(0, 4)}-12` : periodoBalanza(granularidad, comparar);
     const actual = await obtenerSituacionFinanciera(db, periodoActual);
     if (!actual) throw new Error(`No hay Estado de Situación Financiera importado para ${periodoActual}`);
     const anterior = await obtenerSituacionFinanciera(db, periodoAnterior);
     if (!anterior) throw new Error(`No hay Estado de Situación Financiera importado para el período comparativo ${periodoAnterior}`);
     const reporte = tipo === "flujo-efectivo"
       ? reporteFlujoDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta)
-      : reporteSituacionComparativaDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta);
-    return { ...reporte, granularidad, periodoEtiqueta: actualDatos.etiqueta, comparativoEtiqueta: anteriorDatos.etiqueta };
+      : tipo === "situacion-comparativa"
+        ? reporteSituacionComparativaDesdeSituaciones(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta)
+        : reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+    return { ...reporte, granularidad: esCambioPatrimonio ? "anio" : granularidad, periodoEtiqueta: esCambioPatrimonio ? String(reporte.periodo) : actualDatos.etiqueta, comparativoEtiqueta: esCambioPatrimonio ? String(reporte.periodoComparativo) : anteriorDatos.etiqueta };
   }
   const actual = await obtenerBalanza(db, periodoBalanza(granularidad, periodo));
   if (!actual) throw new Error(`No hay balanza importada para ${periodoBalanza(granularidad, periodo)}`);
@@ -247,6 +306,6 @@ export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte,
 
 export function reporteCsv(reporte:ReporteFinanciero):string {
   const escape=(value:string|number|undefined)=>`"${String(value??"").replaceAll('"','""')}"`;
-  const rows=[reporte.columnas.map(escape).join(","),...reporte.filas.map(f=>[f.codigo?`${f.codigo} · ${f.concepto}`:f.concepto,f.actual,f.anterior,f.variacion].slice(0,reporte.columnas.length).map(escape).join(","))];
+  const rows=[reporte.columnas.map(escape).join(","),...reporte.filas.map(f=>[f.codigo?`${f.codigo} · ${f.concepto}`:f.concepto,...(f.valores ?? [f.actual,f.anterior,f.variacion])].slice(0,reporte.columnas.length).map(escape).join(","))];
   return `\uFEFF${rows.join("\n")}`;
 }
