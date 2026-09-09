@@ -15,6 +15,8 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
   const [reporteNuevo, setReporteNuevo] = useState("");
   const [enlaces, setEnlaces] = useState<Record<string, string>>({});
   const [observaciones, setObservaciones] = useState("");
+  const [filtroLineas, setFiltroLineas] = useState("");
+  const [estadoLineas, setEstadoLineas] = useState<LineaBanco["estadoConciliacion"] | "todas">("todas");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -109,6 +111,32 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
   const conciliacion = detalle?.conciliacion;
   const editable = Boolean(conciliacion && conciliacion.estado === "borrador" && canReconcile);
   const disponiblesMovimientos = (detalle?.movimientos ?? []).filter(movimiento => !movimiento.lineaId);
+  const lineasDetalle = (detalle?.lineas ?? []).filter(linea => {
+    const texto = filtroLineas.trim().toLowerCase();
+    const coincideTexto = !texto || [linea.descripcion, linea.referencia, linea.fecha, linea.movimiento?.concepto].some(value => String(value ?? "").toLowerCase().includes(texto));
+    const coincideEstado = estadoLineas === "todas" || linea.estadoConciliacion === estadoLineas;
+    return coincideTexto && coincideEstado;
+  });
+
+  function movimientoCell(linea: LineaConciliacion) {
+    if (linea.movimiento) {
+      return <div className="matchCell"><b>{linea.movimiento.concepto}</b><small>{linea.movimiento.fecha} · {formatearMoneda(linea.movimiento.montoOriginal, linea.movimiento.moneda)}{!linea.movimiento.completo ? " · minuta histórica sin línea bancaria marcada" : ""}</small>{editable ? <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Deshacer enlace</button> : null}</div>;
+    }
+    if (!editable) return <small>{linea.estadoConciliacion === "descartada" ? "Descartada sin enlace contable" : "Sin movimiento enlazado"}</small>;
+    if (pendienteDeTasa(linea)) return <small>Registre la tasa de cambio de esta fecha en Configuración → Tasas de cambio para poder enlazarla.</small>;
+    return <div className="matchCell">
+      <select value={enlaces[linea.id] ?? ""} onChange={event => setEnlaces(current => ({ ...current, [linea.id]: event.target.value }))} disabled={!disponiblesMovimientos.length}>
+        <option value="">{disponiblesMovimientos.length ? "Seleccione un movimiento" : "Sin minutas disponibles en el período"}</option>
+        {disponiblesMovimientos.map(movimiento => <option key={movimiento.id} value={movimiento.id}>{movimiento.fecha} · {formatearMoneda(movimiento.montoOriginal, movimiento.moneda)} · {movimiento.concepto}{Math.abs(movimiento.montoOriginal - Math.abs(netoLinea(linea))) < 0.01 ? " · monto coincide" : ""}</option>)}
+      </select>
+      <div className="matchActions">
+        <button className="linkButton" type="button" onClick={() => accionLinea("conciliar", linea)} disabled={saving || !enlaces[linea.id]}>Enlazar</button>
+        {linea.estadoConciliacion === "pendiente"
+          ? <button className="linkButton" type="button" onClick={() => accionLinea("descartar", linea)} disabled={saving}>Descartar</button>
+          : <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Reabrir</button>}
+      </div>
+    </div>;
+  }
 
   return <><div className="pageHead"><div><span className="eyebrow">CONCILIACIÓN</span><h1>Conciliación bancaria</h1><p>Enlace cada movimiento del estado de cuenta con las minutas registradas y cierre el período con aprobación.</p></div></div>
     {canReconcile && canApprove ? <div className="segregationWarning" role="alert"><b>Segregación de funciones</b><span>Advertencia: Usted tiene permisos de conciliación Y aprobación. Para control interno, se recomienda separar estas funciones entre usuarios distintos. Si concilia y aprueba una misma conciliación, la excepción quedará registrada en auditoría.</span></div> : null}
@@ -150,31 +178,31 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
         </div>
         {conciliacion.estado !== "borrador" ? <div className="readOnlyBanner">Conciliación {conciliacion.estado} por {conciliacion.revisadoPorNombre ?? "revisor no registrado"}{conciliacion.revisadoEn ? ` el ${new Date(conciliacion.revisadoEn).toLocaleString("es-NI")}` : ""}.{conciliacion.observaciones ? ` Observaciones: ${conciliacion.observaciones}` : ""}</div> : null}
         {conciliacion.estado === "borrador" && conciliacion.lineasPendientes > 0 && canApprove ? <div className="readOnlyBanner">Para aprobar debe enlazar o descartar las {conciliacion.lineasPendientes} líneas pendientes.</div> : null}
-        <div className="tableWrap"><table><thead><tr><th>#</th><th>FECHA</th><th>DESCRIPCIÓN</th><th>MONTO</th><th>ESTADO</th><th>MOVIMIENTO CONTABLE</th></tr></thead><tbody>{(detalle?.lineas ?? []).map(linea => <tr key={linea.id}>
+        <div className="tableToolbar">
+          <label>Buscar<input value={filtroLineas} onChange={event => setFiltroLineas(event.target.value)} placeholder="Descripción, referencia o minuta"/></label>
+          <label>Estado<select value={estadoLineas} onChange={event => setEstadoLineas(event.target.value as LineaBanco["estadoConciliacion"] | "todas")}><option value="todas">Todas</option><option value="pendiente">Pendientes</option><option value="conciliada">Conciliadas</option><option value="descartada">Descartadas</option></select></label>
+          <span>{lineasDetalle.length} de {detalle?.lineas.length ?? 0} líneas</span>
+        </div>
+        <div className="tableWrap reconciliationTable"><table><thead><tr><th>#</th><th>FECHA</th><th>DESCRIPCIÓN</th><th>MONTO</th><th>ESTADO</th><th>MOVIMIENTO CONTABLE</th></tr></thead><tbody>{lineasDetalle.map(linea => <tr key={linea.id}>
           <td>{linea.numeroLinea}</td>
           <td>{linea.fecha ?? "Sin fecha"}</td>
           <td><b>{linea.descripcion}</b>{linea.referencia ? <small>Ref. {linea.referencia}</small> : null}</td>
           <td className={netoLinea(linea) < 0 ? "amount negative" : "amount positive"}>{formatearMoneda(netoLinea(linea), linea.moneda)}</td>
           <td><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span>{pendienteDeTasa(linea) ? <small className="status pending">Pendiente de completar tasa USD</small> : null}</td>
-          <td>{linea.movimiento
-            ? <div className="matchCell"><b>{linea.movimiento.concepto}</b><small>{linea.movimiento.fecha} · {formatearMoneda(linea.movimiento.montoOriginal, linea.movimiento.moneda)}{!linea.movimiento.completo ? " · minuta histórica sin línea bancaria marcada" : ""}</small>{editable ? <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Deshacer enlace</button> : null}</div>
-            : editable
-              ? pendienteDeTasa(linea)
-                ? <small>Registre la tasa de cambio de esta fecha en Configuración → Tasas de cambio para poder enlazarla.</small>
-                : <div className="matchCell">
-                  <select value={enlaces[linea.id] ?? ""} onChange={event => setEnlaces(current => ({ ...current, [linea.id]: event.target.value }))} disabled={!disponiblesMovimientos.length}>
-                    <option value="">{disponiblesMovimientos.length ? "Seleccione un movimiento" : "Sin minutas disponibles en el período"}</option>
-                    {disponiblesMovimientos.map(movimiento => <option key={movimiento.id} value={movimiento.id}>{movimiento.fecha} · {formatearMoneda(movimiento.montoOriginal, movimiento.moneda)} · {movimiento.concepto}{Math.abs(movimiento.montoOriginal - Math.abs(netoLinea(linea))) < 0.01 ? " · monto coincide" : ""}</option>)}
-                  </select>
-                  <div className="matchActions">
-                    <button className="linkButton" type="button" onClick={() => accionLinea("conciliar", linea)} disabled={saving || !enlaces[linea.id]}>Enlazar</button>
-                    {linea.estadoConciliacion === "pendiente"
-                      ? <button className="linkButton" type="button" onClick={() => accionLinea("descartar", linea)} disabled={saving}>Descartar</button>
-                      : <button className="linkButton" type="button" onClick={() => accionLinea("reabrir", linea)} disabled={saving}>Reabrir</button>}
-                  </div>
-                </div>
-              : <small>{linea.estadoConciliacion === "descartada" ? "Descartada sin enlace contable" : "Sin movimiento enlazado"}</small>}</td>
+          <td>{movimientoCell(linea)}</td>
         </tr>)}</tbody></table></div>
+        <div className="mobileRecordList" aria-label="Líneas de conciliación">
+          {lineasDetalle.map(linea => <article className="mobileRecordCard" key={linea.id}>
+            <header>
+              <div><b>#{linea.numeroLinea} · {linea.fecha ?? "Sin fecha"}</b><span>{linea.referencia ? `Ref. ${linea.referencia}` : "Sin referencia"}</span></div>
+              <strong className={netoLinea(linea) < 0 ? "negative" : "positive"}>{formatearMoneda(netoLinea(linea), linea.moneda)}</strong>
+            </header>
+            <p>{linea.descripcion}</p>
+            <div className="recordMeta"><span className={estadoLineaClass(linea.estadoConciliacion)}>{linea.estadoConciliacion}</span>{pendienteDeTasa(linea) ? <span className="status pending">Pendiente de tasa USD</span> : null}</div>
+            <div className="recordActionBlock">{movimientoCell(linea)}</div>
+          </article>)}
+        </div>
+        {!lineasDetalle.length ? <div className="emptySmall">No hay líneas que coincidan con los filtros seleccionados.</div> : null}
       </section>
       {disponiblesMovimientos.length ? <section className="panel tablePanel">
         <div className="panelHead"><div><h2>Minutas sin respaldo bancario</h2><p>Movimientos registrados en libros sobre esta cuenta que no aparecen enlazados</p></div></div>
