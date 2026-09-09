@@ -34,9 +34,11 @@ export type RolAdmin = { id: string; nombre: string; descripcion: string; permis
 export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
 export type Iglesia = { codigo: string; nombre: string; estado?: "activa" | "inactiva" };
 export type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO"; estado?: "activa" | "inactiva" };
-export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
+export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 export type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoFuente?:string; periodoComparativoFuente?:string; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean;esEncabezado?:boolean}[]; generadoEn:string; advertencias?:string[] };
+export type FilaReporteMinuta = { id:string; fecha:string; iglesiaCodigo:string|null; iglesiaNombre:string|null; cuentaBancariaNumero:string|null; referencia:string|null; concepto:string; monto:number; lineas:number; estado:"registrado"|"anulado" };
+export type ReporteMinutasData = { titulo:string; desde:string; hasta:string; iglesiaCodigo:string|null; filas:FilaReporteMinuta[]; resumen:{ total:number; vigentes:number; anuladas:number; montoVigente:number }; iglesias:Iglesia[]; truncado:boolean; generadoEn:string };
 export type CuentaMovimiento = { codigo: string; descripcion: string; naturaleza: "deudora" | "acreedora"; clasificacionFlujo: "operación" | "inversión" | "financiamiento" | "no aplica"; esCuentaMovimiento: boolean; estado: "activa" | "inactiva" };
 export type DetalleMinuta = { tipo: "debito" | "credito"; cuentaCodigo: string; monto: string; afectaCuentaBancaria?: boolean; montoOriginal?: string };
 export type MovimientoRegistrado = { id: string; fecha: string; iglesiaCodigo: string | null; cuentaBancariaNumero: string | null; referencia: string | null; concepto: string; estado: "registrado" | "anulado"; creadoEn: string; enlazadoAConciliacion?: boolean };
@@ -92,6 +94,7 @@ export const opcionesReportesIniciales:OpcionReporte[]=[
   {tipo:"cambio-patrimonio",titulo:"Estado de cambio en el patrimonio",descripcion:"Variaciones del patrimonio institucional.",icono:"dashboard"},
   {tipo:"situacion-comparativa",titulo:"Estado de situación comparativo",descripcion:"Todos los saldos finales de ambos períodos y su variación.",icono:"reports"},
   {tipo:"resultado-comparativo",titulo:"Estado de resultado comparativo",descripcion:"Ingresos, gastos y resultado neto.",icono:"entry"},
+  {tipo:"minutas",titulo:"Reporte de minutas",descripcion:"Filtre las minutas ingresadas por iglesia y período.",icono:"reports"},
 ];
 export const dinero=new Intl.NumberFormat("es-NI",{style:"currency",currency:"NIO",minimumFractionDigits:2});
 export const currentYear = () => new Date().getFullYear();

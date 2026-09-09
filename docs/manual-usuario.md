@@ -557,8 +557,11 @@ Cada panel muestra los **campos reconocidos** del archivo antes de importar. Rev
 | Estado de cambio en el patrimonio | Variaciones del patrimonio institucional |
 | Estado de situación comparativo | Activos, pasivos y patrimonio |
 | Estado de resultado comparativo | Ingresos, gastos y resultado neto |
+| Reporte de minutas | Minutas registradas, filtradas por iglesia y rango de fechas |
 
 3. Seleccione período y granularidad.
+
+> **El reporte de minutas no usa período/comparar como los demás.** Se filtra por rango de fechas (Desde/Hasta) y, opcionalmente, por iglesia — pensado para auditorías puntuales o para revisar qué se registró en un rango específico, no para comparar dos períodos contables.
 4. Genere y descargue.
 
 El **flujo de efectivo** se exporta a Excel con el **formato oficial** de la institución, a partir de la plantilla incluida en el sistema.
@@ -942,6 +945,7 @@ Una conciliación **Rechazada** vuelve al operador bancario para corrección.
 4. Presione **Cerrar período** y confirme.
 
 **El sistema impide cerrar un período cuando existen:**
+- el **período contable anterior** todavía no está cerrado — los meses se cierran en orden, sin excepción, para que nunca quede un hueco donde no se sabe si un mes intermedio quedó completo;
 - conciliaciones en estado **borrador** o **rechazada** con fechas dentro del período;
 - balanzas importadas del período con estado **con diferencias**.
 

@@ -10,6 +10,7 @@ import {
   MOTIVO_REAPERTURA_MINIMO,
   obtenerPeriodo,
   reabrirPeriodo,
+  validarCierreSecuencial,
 } from "../../../../lib/periodos";
 
 type AccionPeriodo = "revision" | "cerrar" | "reabrir";
@@ -65,6 +66,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pe
 
       if (accion === "cerrar") {
         if (actual.estado === "cerrado") return jsonError("El período ya está cerrado", 409);
+        const bloqueoSecuencial = await validarCierreSecuencial(tx, periodo);
+        if (bloqueoSecuencial) {
+          await registrarAuditoria(tx, {
+            user,
+            modulo: "Cierre contable",
+            accion: "Intento de cierre rechazado",
+            entidad: "periodos_contables",
+            entidadId: periodo,
+            resultado: "error",
+            detalle: `Período ${periodo}: ${bloqueoSecuencial.motivo}`,
+          });
+          return Response.json(
+            { error: bloqueoSecuencial.detalle, impedimentos: [bloqueoSecuencial] },
+            { status: 409, headers: { "Cache-Control": "no-store" } },
+          );
+        }
         const impedimentos = await impedimentosParaCerrar(tx, periodo);
         if (impedimentos.length) {
           await registrarAuditoria(tx, {

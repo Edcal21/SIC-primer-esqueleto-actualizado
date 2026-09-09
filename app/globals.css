@@ -28,6 +28,8 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;back
 @media(max-width:720px){.sidebar{position:static;width:100%;box-shadow:none}.sidebar nav{display:flex;gap:8px;overflow:auto}.navSection{display:flex;gap:8px}.navLabel{display:none}.navItem{min-width:max-content}.navIcon{width:16px;height:16px}.balanceSummary{grid-template-columns:1fr}.balanceSummary span{border-right:0;border-bottom:1px solid var(--line)}.balanceSummary span:last-child{border-bottom:0}th,td{padding:10px 12px}}
 
 .bankUploadPanel{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,380px) auto;align-items:center}.bankUploadPanel h2{font-size:17px}.bankUploadPanel p{font-size:12px}.fileDrop{display:grid;gap:3px;border:1px dashed #b8c7d6;border-radius:8px;background:#f8fbfd;padding:12px 14px;cursor:pointer}.fileDrop:hover{border-color:var(--blue);background:#f3f8fc}.fileDrop input{position:absolute;inline-size:1px;block-size:1px;opacity:0;pointer-events:none}.fileDrop span{font-size:13px;font-weight:700;color:#20364d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fileDrop small{font-size:12px;color:var(--muted)}.uploadError{font-size:12px}.tablePanel .panelHead button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:8px 12px;color:var(--blue-dark);font-size:12px;cursor:pointer}.tablePanel .panelHead button:hover{border-color:var(--blue);background:#f3f8fc}
+
+.reportMinuteFilters{grid-template-columns:minmax(140px,.7fr) minmax(140px,.7fr) minmax(240px,1.6fr) auto;align-items:end;padding:0 20px 20px;border-bottom:1px solid var(--line)}.reportMinuteFilters .formActions{margin:0;padding:0}.reportMinuteFilters .primary{min-height:39px}.reportViewer>.compactMetrics{padding:20px;grid-template-columns:repeat(3,1fr)}@media(max-width:900px){.reportMinuteFilters{grid-template-columns:1fr 1fr}.reportMinuteFilters label:nth-child(3){grid-column:1/-1}.reportViewer>.compactMetrics{grid-template-columns:1fr}}@media(max-width:720px){.reportMinuteFilters{grid-template-columns:1fr}.reportMinuteFilters label:nth-child(3){grid-column:auto}.reportMinuteFilters .formActions,.reportMinuteFilters .primary{width:100%}}
 @media(max-width:900px){.bankUploadPanel{grid-template-columns:1fr}.bankUploadPanel .primary{width:100%}}
 
 :root{--muted:#35506a;--text-soft:#29445f;--text-subtle:#496986;--line:#cfdde9}
@@ -128,8 +130,26 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;back
 .configPreview b{display:block;font:700 17px Georgia;color:var(--blue-dark)}
 .configPreview small{display:block;margin-top:3px;font-size:12px;color:var(--text-soft)}
 .configPreview .logoMark{flex:0 0 auto}
+.tableToolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:0 20px 14px;border-bottom:1px solid var(--line)}
+.tableToolbar label{display:grid;gap:5px;min-width:190px;font-size:12px;font-weight:700;color:var(--blue-dark)}
+.tableToolbar input,.tableToolbar select{border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font-size:13px;padding:9px 10px}
+.tableToolbar label:first-child{flex:1;min-width:min(360px,100%)}
+.tableToolbar>span{margin-left:auto;color:var(--text-soft);font-size:12px;font-weight:700}
+.reconciliationTable table{min-width:980px}
+.reconciliationTable th:nth-child(3),.reconciliationTable td:nth-child(3){min-width:280px;max-width:430px}
+.reconciliationTable th:nth-child(6),.reconciliationTable td:nth-child(6){min-width:320px}
+.mobileRecordList{display:none}
+.mobileRecordCard{border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px;display:grid;gap:10px;box-shadow:0 1px 2px rgba(15,23,42,.03)}
+.mobileRecordCard header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.mobileRecordCard header div{display:grid;gap:3px;min-width:0}
+.mobileRecordCard header b{font-size:13px;color:var(--blue-dark)}
+.mobileRecordCard header span,.mobileRecordCard p{font-size:12px;color:var(--text-soft)}
+.mobileRecordCard header strong{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;white-space:nowrap}
+.mobileRecordCard p{margin:0;line-height:1.45}
+.recordMeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.recordActionBlock{border-top:1px solid #edf2f7;padding-top:10px}
 @media(max-width:1100px){.bankUploadPanel{grid-template-columns:1fr 1fr}}
-@media(max-width:900px){.bankUploadPanel{grid-template-columns:1fr}.bankUploadPanel .uploadField{width:100%}.matchCell{min-width:0}}
+@media(max-width:900px){.bankUploadPanel{grid-template-columns:1fr}.bankUploadPanel .uploadField{width:100%}.matchCell{min-width:0}.reconciliationTable{display:none}.mobileRecordList{display:grid;gap:10px;padding:14px 16px}.tableToolbar{padding:0 16px 14px}.tableToolbar label{min-width:100%;}.tableToolbar>span{margin-left:0}.mobileRecordCard .matchActions{justify-content:space-between}.mobileRecordCard .linkButton{font-size:13px}.mobileRecordCard .matchCell select{font-size:13px}}
 
 /* Accesibilidad y microinteracciones operativas */
 :where(button,a,input,select,textarea,[tabindex]:not([tabindex="-1"])):focus-visible{

@@ -2,7 +2,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import type { getDb } from "../db";
 import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, lineasSituacionFinanciera, reportesCatalogo } from "../db/schema";
 
-export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo";
+export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; esTotal?: boolean; esEncabezado?: boolean };
 export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; generadoEn: string; advertencias?: string[] };
@@ -17,6 +17,7 @@ export const catalogoReportes: { tipo: TipoReporte; titulo: string; descripcion:
   { tipo:"cambio-patrimonio", titulo:"Estado de cambio en el patrimonio", descripcion:"Movimientos que explican la variación del patrimonio institucional." },
   { tipo:"situacion-comparativa", titulo:"Estado de situación comparativo", descripcion:"Activos, pasivos y patrimonio comparados entre dos períodos." },
   { tipo:"resultado-comparativo", titulo:"Estado de resultado comparativo", descripcion:"Ingresos, gastos y resultado neto comparados entre dos períodos." },
+  { tipo:"minutas", titulo:"Reporte de minutas", descripcion:"Minutas ingresadas filtradas por iglesia y período de tiempo." },
 ];
 
 export function esTipoReporte(value:string): value is TipoReporte { return catalogoReportes.some(item=>item.tipo===value); }
@@ -29,9 +30,15 @@ export async function obtenerCatalogoReportes(db: Db) {
       descripcion: reportesCatalogo.descripcion,
       icono: reportesCatalogo.icono,
     }).from(reportesCatalogo).where(eq(reportesCatalogo.estado, "activo")).orderBy(asc(reportesCatalogo.orden));
-    return rows.length ? rows.map(row => ({ ...row, tipo: row.tipo as TipoReporte })) : catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry"][index] ?? "reports" }));
+    if (!rows.length) return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry", "reports"][index] ?? "reports" }));
+    const disponibles = rows.map(row => ({ ...row, tipo: row.tipo as TipoReporte }));
+    // El reporte de minutas no depende de una migración de catálogo para existir: si la fila
+    // "minutas" todavía no está en reportes_catalogo (instalación no migrada a la última versión),
+    // se agrega en memoria para que la opción no desaparezca del centro de reportes.
+    if (!disponibles.some(item => item.tipo === "minutas")) disponibles.push({ ...catalogoReportes.find(item => item.tipo === "minutas")!, icono: "reports" });
+    return disponibles;
   } catch {
-    return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry"][index] ?? "reports" }));
+    return catalogoReportes.map((item, index) => ({ ...item, icono: ["bank", "catalog", "dashboard", "reports", "entry", "reports"][index] ?? "reports" }));
   }
 }
 
@@ -45,6 +52,15 @@ function datosPeriodo(granularidad:Granularidad, periodo:string){
 
 const periodoBalanza = (granularidad: Granularidad, periodo: string) => granularidad === "anio" ? `${periodo.slice(0,4)}-12` : periodo.slice(0,7);
 const claseCuenta = (codigo: string) => codigo.startsWith("1") ? "activo" : codigo.startsWith("2") ? "pasivo" : codigo.startsWith("3") ? "patrimonio" : codigo.startsWith("4") ? "ingreso" : codigo.startsWith("5") ? "gasto" : "otra";
+/** Una cuenta "de mayor" (p. ej. 40000000, 41000000) repite el mismo saldo acumulado que sus
+ *  cuentas hijas en varios niveles de la jerarquía del catálogo — sumar todas las filas de una
+ *  clase por prefijo de código, sin distinguir mayor de detalle, multiplica el total varias veces.
+ *  Una fila es "de detalle" cuando ninguna otra fila de la misma balanza usa su código (sin los
+ *  ceros de relleno finales) como prefijo, es decir, cuando es una hoja del catálogo. */
+const filasDetalle = (filas: BalanzaPeriodo["filas"]) => filas.filter(fila => {
+  const prefijo = fila.codigo.replace(/0+$/, "");
+  return !filas.some(otra => otra.codigo !== fila.codigo && otra.codigo.startsWith(prefijo));
+});
 
 async function obtenerBalanza(db: Db, periodo: string): Promise<BalanzaPeriodo | null> {
   const [importacion] = await db.select().from(importacionesBalanza).where(eq(importacionesBalanza.periodo, periodo)).orderBy(desc(importacionesBalanza.creadoEn)).limit(1);
@@ -280,8 +296,9 @@ export function reporteCambioPatrimonioDesdeBalanza(actual: BalanzaPeriodo, ante
     return fila?.saldo ?? 0;
   };
   const resultadoEjercicio = (balanza: BalanzaPeriodo) => {
-    const ingresos = balanza.filas.filter(fila => claseCuenta(fila.codigo) === "ingreso").reduce((total, fila) => total + fila.saldo, 0);
-    const gastos = balanza.filas.filter(fila => claseCuenta(fila.codigo) === "gasto").reduce((total, fila) => total + fila.saldo, 0);
+    const detalle = filasDetalle(balanza.filas);
+    const ingresos = detalle.filter(fila => claseCuenta(fila.codigo) === "ingreso").reduce((total, fila) => total + fila.saldo, 0);
+    const gastos = detalle.filter(fila => claseCuenta(fila.codigo) === "gasto").reduce((total, fila) => total + fila.saldo, 0);
     return dosDecimales(ingresos - gastos);
   };
 
@@ -357,7 +374,7 @@ export function reporteCambioPatrimonioDesdeBalanza(actual: BalanzaPeriodo, ante
   };
 }
 
-function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+export function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
   const meta = catalogoReportes.find(item => item.tipo === tipo)!;
   if (tipo === "balanza-anual") {
     const filas: FilaReporte[] = actual.filas.map(fila => ({ codigo: fila.codigo, concepto: fila.concepto, actual: fila.debe, anterior: fila.haber, variacion: fila.debe - fila.haber }));
@@ -368,7 +385,10 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
 
   const anteriores = new Map((anterior?.filas ?? []).map(fila => [fila.codigo, fila]));
   const clases = tipo === "resultado-comparativo" ? ["ingreso", "gasto"] : ["activo", "pasivo", "patrimonio"];
-  const filas = actual.filas
+  // Solo cuentas de detalle: sumar también las de mayor duplicaría el total (ver filasDetalle).
+  const detalleActual = filasDetalle(actual.filas);
+  const detalleAnterior = filasDetalle(anterior?.filas ?? []);
+  const filas = detalleActual
     .filter(fila => clases.includes(claseCuenta(fila.codigo)))
     .map(fila => {
       const saldoAnterior = anteriores.get(fila.codigo)?.saldo ?? 0;
@@ -376,8 +396,8 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
     });
 
   for (const clase of clases) {
-    const actuales = actual.filas.filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
-    const previos = (anterior?.filas ?? []).filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
+    const actuales = detalleActual.filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
+    const previos = detalleAnterior.filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
     filas.push(filaComparativa(`Total ${clase}`, actuales, previos, { esTotal: true }));
   }
 
@@ -385,6 +405,7 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
 }
 
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
+  if (tipo === "minutas") throw new Error("El reporte de minutas utiliza filtros de iglesia y rango de fechas, no período/comparar");
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
   if (tipo === "cambio-patrimonio") {
     if (granularidad !== "anio") throw new Error("El Estado de Cambio en el Patrimonio es un reporte anual; seleccione la vista Año.");

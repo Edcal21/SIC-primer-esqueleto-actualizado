@@ -156,3 +156,48 @@ test("una pérdida del ejercicio anterior se traslada como negativo, y una utili
   assert.equal(linea(reporte, "Traslado esperado (resultado del ejercicio 2024)"), 10000);
   assert.equal(linea(reporte, "Diferencia sin explicar en Utilidades Acumuladas"), 0);
 });
+
+test("una balanza con jerarquía de cuentas (mayor + detalle) no cuenta la utilidad del ejercicio varias veces", () => {
+  // Refleja la forma real de la balanza de la institución: 40000000 (mayor), 41000000 y 41010000
+  // (sub-mayores que repiten el mismo saldo acumulado) y las cuentas de detalle por iglesia
+  // (41010101, 41010102) que sí son las hojas y suman el total real. Sumar por prefijo de clase
+  // sin distinguir mayor de detalle multiplicaría el ingreso varias veces.
+  const anterior = balanza("2024-12", [
+    ["31010000", "Patrimonio", 100000],
+    ["31020000", "Patrimonio Donado", 10000],
+    ["33010100", "Incremento o Decremento del Patrimonio", 0],
+    ["33010200", "Utilidades Acumuladas", -20000],
+    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 0],
+    ["40000000", "INGRESOS", 50000],
+    ["41000000", "INGRESOS / DIEZMOS Y OFRENDAS", 50000],
+    ["41010000", "DIEZMOS / OFRENDAS", 50000],
+    ["41010101", "Diezmos Iglesia Sede Nacional", 30000],
+    ["41010102", "Diezmos Iglesia Bello Horizonte", 20000],
+    ["50000000", "GASTOS OPERATIVOS", 45000],
+    ["51000000", "GASTOS DE OPERACION", 45000],
+    ["51010101", "Gastos de personal", 45000],
+  ]);
+  const actual = balanza("2025-12", [
+    ["31010000", "Patrimonio", 100000],
+    ["31020000", "Patrimonio Donado", 10000],
+    ["33010100", "Incremento o Decremento del Patrimonio", 0],
+    ["33010200", "Utilidades Acumuladas", -15000], // -20000 + 5000 (resultado 2024)
+    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 0],
+    ["40000000", "INGRESOS", 60000],
+    ["41000000", "INGRESOS / DIEZMOS Y OFRENDAS", 60000],
+    ["41010000", "DIEZMOS / OFRENDAS", 60000],
+    ["41010101", "Diezmos Iglesia Sede Nacional", 38000],
+    ["41010102", "Diezmos Iglesia Bello Horizonte", 22000],
+    ["50000000", "GASTOS OPERATIVOS", 50000],
+    ["51000000", "GASTOS DE OPERACION", 50000],
+    ["51010101", "Gastos de personal", 50000],
+  ]);
+
+  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
+  // Resultado real 2024 = 50000 (ingresos, un solo nivel) - 45000 (gastos, un solo nivel) = 5000.
+  // Si se sumaran los tres niveles de mayor además del detalle, saldría ~4x más grande.
+  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2024"), 5000);
+  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2025"), 10000);
+  assert.equal(linea(reporte, "Traslado esperado (resultado del ejercicio 2024)"), 5000);
+  assert.equal(linea(reporte, "Diferencia sin explicar en Utilidades Acumuladas"), 0);
+});
