@@ -241,6 +241,122 @@ export function reporteSituacionComparativaDesdeSituaciones(actual: SituacionPer
   };
 }
 
+/** Códigos reales del catálogo de esta institución para los componentes del patrimonio. La
+ *  balanza no distingue "cuenta de patrimonio" con un campo propio — igual que el resto del
+ *  sistema (ver claseCuenta), la única señal es el código, así que aquí se referencian los
+ *  códigos exactos en vez de inferir por prefijo, porque el ECP necesita cada componente por
+ *  separado, no la suma de la clase "3". */
+const CODIGOS_PATRIMONIO = {
+  patrimonio: "31010000",
+  patrimonioDonado: "31020000",
+  incrementoDecremento: "33010100",
+  utilidadesAcumuladas: "33010200",
+  revaluacion: "33010300",
+} as const;
+
+/**
+ * Construye el Estado de Cambio en el Patrimonio a partir de dos balanzas de comprobación
+ * anuales (31 de diciembre de dos años consecutivos). Es un reporte anual, no mensual (confirmado
+ * con contabilidad): compara únicamente cierre contra cierre.
+ *
+ * La balanza no registra movimientos individuales de patrimonio (aportes, traslados, ajustes) —
+ * solo saldos por cuenta y período, igual que el flujo de efectivo se deriva por diferencia entre
+ * dos Estados de Situación Financiera. Por eso "Utilidades Acumuladas" se construye por
+ * diferencia entre los saldos reales de la cuenta 33010200 en ambos años, y el traslado esperado
+ * (el resultado del ejercicio anterior) se contrasta contra esa diferencia real como control de
+ * calidad — nunca se asume que coinciden. Si no coinciden, hay un ajuste adicional en esa cuenta
+ * que el sistema no puede explicar por sí solo, y se advierte en vez de ocultarlo.
+ *
+ * "Utilidad del Ejercicio" de cada año se calcula como Ingresos menos Gastos de esa balanza (clases
+ * "4" y "5" por código, igual que el resto del sistema) porque el resultado de un año no se
+ * traslada a Utilidades Acumuladas hasta el cierre del año siguiente — al 31 de diciembre del año
+ * que se reporta, ese resultado todavía es una línea abierta, no parte de Utilidades Acumuladas.
+ */
+export function reporteCambioPatrimonioDesdeBalanza(actual: BalanzaPeriodo, anterior: BalanzaPeriodo, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+  const ausentes: string[] = [];
+  const valorCuenta = (balanza: BalanzaPeriodo, codigo: string, nombre: string) => {
+    const fila = balanza.filas.find(item => item.codigo === codigo);
+    if (!fila) ausentes.push(`${nombre} (${codigo}) en ${balanza.periodo}`);
+    return fila?.saldo ?? 0;
+  };
+  const resultadoEjercicio = (balanza: BalanzaPeriodo) => {
+    const ingresos = balanza.filas.filter(fila => claseCuenta(fila.codigo) === "ingreso").reduce((total, fila) => total + fila.saldo, 0);
+    const gastos = balanza.filas.filter(fila => claseCuenta(fila.codigo) === "gasto").reduce((total, fila) => total + fila.saldo, 0);
+    return dosDecimales(ingresos - gastos);
+  };
+
+  const patrimonioIni = valorCuenta(anterior, CODIGOS_PATRIMONIO.patrimonio, "Patrimonio");
+  const donadoIni = valorCuenta(anterior, CODIGOS_PATRIMONIO.patrimonioDonado, "Patrimonio Donado");
+  const incDecIni = valorCuenta(anterior, CODIGOS_PATRIMONIO.incrementoDecremento, "Incremento o Decremento del Patrimonio");
+  const uaIni = valorCuenta(anterior, CODIGOS_PATRIMONIO.utilidadesAcumuladas, "Utilidades Acumuladas");
+  const revaluacionIni = valorCuenta(anterior, CODIGOS_PATRIMONIO.revaluacion, "Incremento o Decremento por Revaluación de Activos");
+  const resultadoAnterior = resultadoEjercicio(anterior);
+  const totalIni = dosDecimales(patrimonioIni + donadoIni + incDecIni + uaIni + revaluacionIni + resultadoAnterior);
+
+  const patrimonioFin = valorCuenta(actual, CODIGOS_PATRIMONIO.patrimonio, "Patrimonio");
+  const donadoFin = valorCuenta(actual, CODIGOS_PATRIMONIO.patrimonioDonado, "Patrimonio Donado");
+  const incDecFin = valorCuenta(actual, CODIGOS_PATRIMONIO.incrementoDecremento, "Incremento o Decremento del Patrimonio");
+  const uaFin = valorCuenta(actual, CODIGOS_PATRIMONIO.utilidadesAcumuladas, "Utilidades Acumuladas");
+  const revaluacionFin = valorCuenta(actual, CODIGOS_PATRIMONIO.revaluacion, "Incremento o Decremento por Revaluación de Activos");
+  const resultadoActual = resultadoEjercicio(actual);
+  const totalFin = dosDecimales(patrimonioFin + donadoFin + incDecFin + uaFin + revaluacionFin + resultadoActual);
+
+  const deltaUA = dosDecimales(uaFin - uaIni);
+  const diferenciaUA = dosDecimales(deltaUA - resultadoAnterior);
+
+  const filas: FilaReporte[] = [
+    { concepto: `Saldos al 31 de diciembre de ${etiquetaComparativa}`, actual: 0, esTotal: true, esEncabezado: true },
+    { concepto: "Patrimonio", actual: patrimonioIni },
+    { concepto: "Patrimonio Donado", actual: donadoIni },
+    { concepto: "Incremento o Decremento del Patrimonio", actual: incDecIni },
+    { concepto: "Utilidades Acumuladas", actual: uaIni },
+    { concepto: "Incremento o Decremento por Revaluación de Activos", actual: revaluacionIni },
+    { concepto: `Utilidad (pérdida) del Ejercicio ${etiquetaComparativa}`, actual: resultadoAnterior },
+    { concepto: "Total Patrimonio (saldo inicial)", actual: totalIni, esTotal: true },
+
+    { concepto: `Movimientos del ejercicio ${etiqueta}`, actual: 0, esTotal: true, esEncabezado: true },
+    { concepto: "Variación en Patrimonio", actual: dosDecimales(patrimonioFin - patrimonioIni) },
+    { concepto: "Variación en Patrimonio Donado", actual: dosDecimales(donadoFin - donadoIni) },
+    { concepto: "Variación en Incremento o Decremento del Patrimonio", actual: dosDecimales(incDecFin - incDecIni) },
+    { concepto: "Variación en Utilidades Acumuladas", actual: deltaUA },
+    { concepto: "Variación en Incremento o Decremento por Revaluación de Activos", actual: dosDecimales(revaluacionFin - revaluacionIni) },
+    { concepto: `Utilidad (pérdida) del Ejercicio ${etiqueta}`, actual: resultadoActual },
+    { concepto: `Salida de la Utilidad del Ejercicio ${etiquetaComparativa} (trasladada a Utilidades Acumuladas)`, actual: dosDecimales(-resultadoAnterior) },
+    { concepto: "Total movimientos del ejercicio", actual: dosDecimales(totalFin - totalIni), esTotal: true },
+
+    { concepto: `Saldos al 31 de diciembre de ${etiqueta}`, actual: 0, esTotal: true, esEncabezado: true },
+    { concepto: "Patrimonio", actual: patrimonioFin },
+    { concepto: "Patrimonio Donado", actual: donadoFin },
+    { concepto: "Incremento o Decremento del Patrimonio", actual: incDecFin },
+    { concepto: "Utilidades Acumuladas", actual: uaFin },
+    { concepto: "Incremento o Decremento por Revaluación de Activos", actual: revaluacionFin },
+    { concepto: `Utilidad (pérdida) del Ejercicio ${etiqueta}`, actual: resultadoActual },
+    { concepto: "Total Patrimonio (saldo final)", actual: totalFin, esTotal: true },
+
+    { concepto: "Control: traslado a Utilidades Acumuladas", actual: 0, esTotal: true, esEncabezado: true },
+    { concepto: `Traslado esperado (resultado del ejercicio ${etiquetaComparativa})`, actual: resultadoAnterior },
+    { concepto: `Variación real de Utilidades Acumuladas (${etiquetaComparativa} → ${etiqueta})`, actual: deltaUA },
+    { concepto: "Diferencia sin explicar en Utilidades Acumuladas", actual: diferenciaUA, esTotal: true },
+  ];
+
+  const meta = catalogoReportes.find(item => item.tipo === "cambio-patrimonio")!;
+  return {
+    tipo: "cambio-patrimonio", titulo: meta.titulo, descripcion: meta.descripcion,
+    periodo: Number(actual.periodo.slice(0, 4)), periodoComparativo: Number(anterior.periodo.slice(0, 4)),
+    periodoFuente: actual.periodo, periodoComparativoFuente: anterior.periodo,
+    moneda: "NIO", fuente: `Balanza de comprobación ${anterior.periodo} y ${actual.periodo}`,
+    columnas: ["Concepto", `${etiquetaComparativa} → ${etiqueta}`], filas, generadoEn: new Date().toISOString(),
+    advertencias: [
+      ...(ausentes.length
+        ? [`No se encontraron en la balanza importada: ${[...new Set(ausentes)].join(", ")}. Verifique que el archivo de balanza incluya esos códigos de cuenta.`]
+        : []),
+      ...(Math.abs(diferenciaUA) >= 0.01
+        ? [`Utilidades Acumuladas no se explica completamente por el traslado del resultado de ${etiquetaComparativa}: diferencia de ${diferenciaUA.toFixed(2)}. Puede haber un ajuste adicional registrado en esa cuenta durante el ejercicio — verifique con contabilidad antes de emitir.`]
+        : []),
+    ],
+  };
+}
+
 function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
   const meta = catalogoReportes.find(item => item.tipo === tipo)!;
   if (tipo === "balanza-anual") {
@@ -270,6 +386,16 @@ function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: Bal
 
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
+  if (tipo === "cambio-patrimonio") {
+    if (granularidad !== "anio") throw new Error("El Estado de Cambio en el Patrimonio es un reporte anual; seleccione la vista Año.");
+    const periodoActual = periodoBalanza(granularidad, periodo), periodoAnterior = periodoBalanza(granularidad, comparar);
+    const actual = await obtenerBalanza(db, periodoActual);
+    if (!actual) throw new Error(`No hay balanza importada para ${periodoActual}`);
+    const anterior = await obtenerBalanza(db, periodoAnterior);
+    if (!anterior) throw new Error(`No hay balanza importada para el período comparativo ${periodoAnterior}`);
+    const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta);
+    return { ...reporte, granularidad, periodoEtiqueta: actualDatos.etiqueta, comparativoEtiqueta: anteriorDatos.etiqueta };
+  }
   if (tipo === "flujo-efectivo" || tipo === "situacion-comparativa") {
     const periodoActual = periodoBalanza(granularidad, periodo), periodoAnterior = periodoBalanza(granularidad, comparar);
     const actual = await obtenerSituacionFinanciera(db, periodoActual);

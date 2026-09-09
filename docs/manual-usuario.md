@@ -577,6 +577,12 @@ Sobre la tabla puede aparecer un recuadro **«Revise antes de emitir»**. No blo
 
 > Las dos últimas líneas del reporte (**Efectivo declarado** y **Diferencia**) son el control de cuadre. **Si la diferencia no es cero, no emita el reporte.**
 
+**Estado de cambio en el patrimonio**
+
+A diferencia de los demás reportes, este se alimenta de la **balanza de comprobación** (no del Estado de Situación Financiera) y es **exclusivamente anual** — comparando el cierre del 31 de diciembre de dos años consecutivos. Si se selecciona con granularidad Mes, Trimestre o Día, el sistema lo rechaza con un mensaje pidiendo cambiar a la vista Año.
+
+El reporte muestra los saldos de patrimonio al cierre del año anterior, los movimientos del ejercicio, los saldos al cierre del año actual, y un bloque de **control** al final: contrasta el resultado del ejercicio anterior (lo que debería trasladarse a Utilidades Acumuladas) contra la variación real de esa cuenta entre ambos años. Si no coinciden, el sistema no lo oculta ni lo fuerza a cuadrar — muestra la diferencia exacta y advierte en el recuadro **«Revise antes de emitir»** que puede haber un ajuste contable adicional registrado en Utilidades Acumuladas durante el ejercicio, a verificar con contabilidad antes de emitir el reporte.
+
 > **El contador general es, junto con el auditor, uno de los dos roles con permiso de descarga** (`reportes:descargar`). El operador bancario puede ver los reportes pero no descargarlos.
 
 ---
