@@ -46,7 +46,7 @@
 
 **PARTE IV — OPERACIÓN Y SOPORTE**
 14. Solución de problemas — 14.1 Antes de escalar · 14.2 Cómo leer un mensaje de error · 14.3 Acceso · 14.4 Minutas · 14.5 Estados de cuenta · 14.6 Conciliación · 14.7 Importaciones · 14.8 Períodos · 14.9 Tasas de cambio · 14.10 Administración · 14.11 Reportes · 14.12 Errores del sistema · 14.13 Escalamiento · 14.14 Qué incluir al reportar
-15. Respaldos
+15. Respaldos — 15.1 Cómo funciona · 15.2 Cómo leer la pantalla · 15.3 Instalación (técnico) · 15.4 Restauración (técnico) · 15.5 Prueba periódica · 15.6 Lo que no cubre
 16. Contactos y alcance del soporte
 
 **ANEXOS**
@@ -1425,7 +1425,90 @@ Un reporte útil tiene cinco datos. Sin ellos, el diagnóstico se vuelve adivina
 
 ## 15. Respaldos
 
-> _Sección en elaboración. Debe definirse con el responsable técnico: qué se respalda, con qué frecuencia, dónde se guarda, quién lo verifica y cómo se restaura._
+### 15.1 Cómo funciona
+
+El respaldo de la base de datos **no es un botón dentro del SIC**. Es un proceso que corre solo, todas las noches, directamente en el servidor donde vive la base de datos — deliberadamente separado de la aplicación, para que siga funcionando aunque el SIC esté caído.
+
+| | |
+|---|---|
+| **Qué respalda** | Toda la base de datos: catálogo, minutas, conciliaciones, usuarios, auditoría — todo |
+| **Cuándo** | Automáticamente, una vez por noche |
+| **Formato** | Un archivo `.dump` de PostgreSQL, comprimido, restaurable con las herramientas estándar de PostgreSQL |
+| **Retención** | Los últimos 30 días se conservan en el servidor; los más viejos se eliminan automáticamente |
+| **Dónde se ve el resultado** | **Configuración → Respaldo de la base de datos** (solo el Administrador) |
+
+> **Este sistema entrega el mecanismo del respaldo.** Que efectivamente esté programado y corriendo en el servidor de la institución es responsabilidad de quien administra ese servidor — ver 15.3.
+
+### 15.2 Cómo leer la pantalla
+
+![Panel de respaldo de la base de datos en Configuración](img/admin-respaldos.png)
+
+**Configuración → Respaldo de la base de datos** muestra un estado con tres colores, sin necesidad de tocar una terminal:
+
+| Estado | Qué significa | Qué hacer |
+|---|---|---|
+| 🟢 **Al día** | Hay un respaldo correcto de las últimas 26 horas | Nada — está funcionando |
+| 🟡 **Atrasado** | El último respaldo correcto tiene más de 26 horas | Avisar al responsable técnico; puede ser un retraso de una sola noche |
+| 🔴 **Crítico** | El último intento falló, o no hay ningún respaldo correcto en más de 50 horas | Avisar al responsable técnico **el mismo día** |
+| 🔴 **Sin respaldos** | Nunca se ha registrado ningún respaldo | El proceso automático probablemente no está programado en el servidor — avisar de inmediato |
+
+Debajo del estado hay una tabla con el historial: fecha, si fue automático o manual, si terminó correcto, el tamaño del archivo, y si además se copió a un destino externo.
+
+> **Esta pantalla no genera respaldos ni permite descargarlos.** Solo informa. Generar uno fuera de horario, o restaurar uno, son tareas técnicas que se hacen directamente en el servidor — ver 15.3 y 15.4.
+
+### 15.3 Para el responsable técnico: instalación
+
+Dos archivos, ambos en `scripts/` del proyecto:
+
+| Script | Para qué |
+|---|---|
+| `respaldo-postgresql.sh` | El que corre todas las noches. Hace el respaldo y registra el resultado |
+| `restaurar-postgresql.sh` | El que se usa para restaurar, a mano, cuando hace falta |
+
+**Instalación en el servidor Linux:**
+
+1. Copie ambos scripts al servidor y déles permiso de ejecución: `chmod +x respaldo-postgresql.sh restaurar-postgresql.sh`.
+2. Configure autenticación sin contraseña interactiva con un archivo `~/.pgpass` (permisos `600`):
+   ```
+   localhost:5432:sic:usuario:contraseña
+   ```
+3. Programe la ejecución nocturna con `cron` (por ejemplo, todas las noches a la 1:00 a. m.):
+   ```
+   0 1 * * * DATABASE_URL="postgresql://usuario:contraseña@localhost:5432/sic" /ruta/a/respaldo-postgresql.sh >> /var/log/sic-respaldo.log 2>&1
+   ```
+4. **Configure un destino secundario.** Un respaldo que vive solo en el mismo servidor no protege contra que ese servidor falle. Defina `SIC_RESPALDOS_DESTINO_SECUNDARIO` apuntando a una unidad de red, un disco externo, o una carpeta sincronizada a otro sitio:
+   ```
+   SIC_RESPALDOS_DESTINO_SECUNDARIO="/mnt/respaldo-externo/sic"
+   ```
+5. Verifique que corrió: `Configuración → Respaldo de la base de datos` debe mostrar **Al día** al día siguiente.
+
+**Variables de entorno que acepta el script** (todas opcionales salvo `DATABASE_URL`):
+
+| Variable | Para qué | Por defecto |
+|---|---|---|
+| `SIC_RESPALDOS_DIR` | Carpeta donde se guardan los archivos | `/var/backups/sic` |
+| `SIC_RESPALDOS_DESTINO_SECUNDARIO` | Segunda carpeta a la que se copia cada respaldo | (ninguna) |
+| `SIC_RESPALDOS_RETENCION_DIAS` | Días que se conservan los respaldos locales | 30 |
+
+### 15.4 Para el responsable técnico: restauración
+
+**Nunca se restaura sobre la base de datos en uso sin autorización expresa de la institución** — reemplaza todo su contenido.
+
+```
+./restaurar-postgresql.sh sic-20260315-010000.dump --url postgresql://usuario:contraseña@host:5432/sic
+```
+
+Sin `--confirmar`, el comando solo **lista las tablas que contiene el respaldo**, sin tocar nada — úselo para verificar que es el archivo correcto antes de continuar. Agregar `--confirmar` ejecuta la restauración real, dentro de una sola transacción (si algo falla a mitad de camino, no queda una restauración a medias), y al terminar muestra los conteos de las tablas principales para verificar que el resultado tiene sentido.
+
+### 15.5 Prueba periódica de restauración
+
+Un respaldo que nunca se probó restaurar **no es un respaldo confiable, es una suposición**. Recomendado: una vez por trimestre, restaurar el respaldo más reciente en una base de datos aparte (nunca en la de producción) y confirmar que los conteos de usuarios, minutas y cuentas coinciden con lo esperado. Regístrelo como una tarea recurrente del responsable técnico.
+
+### 15.6 Lo que este mecanismo no cubre
+
+- **No respalda el código del sistema** — eso lo cubre el control de versiones (Git), independiente de este proceso.
+- **No sustituye una política de continuidad del negocio** completa (qué hacer si el servidor físico se pierde, cuánto tiempo de inactividad es aceptable, etc.) — eso debe definirlo la institución con su responsable técnico.
+- **No verifica automáticamente que el respaldo sea restaurable** — por eso 15.5 es una tarea manual, no automática.
 
 ## 16. Contactos y alcance del soporte
 

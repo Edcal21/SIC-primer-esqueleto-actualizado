@@ -397,3 +397,30 @@ export const conciliacionesBancarias = pgTable("conciliaciones_bancarias", {
   check("ck_conciliaciones_bancarias_estado", sql`${table.estado} in ('borrador', 'aprobada', 'rechazada')`),
   check("ck_conciliaciones_bancarias_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
 ]);
+
+/**
+ * Bitácora de los respaldos de la base de datos. La fila la escribe directamente
+ * scripts/respaldo-postgresql.sh (vía psql) al terminar cada corrida de pg_dump en el
+ * servidor — nunca la aplicación. El respaldo en sí es un archivo en el servidor, fuera
+ * de esta tabla; aquí solo queda la evidencia de que corrió, cuándo y con qué resultado,
+ * para que la pantalla de Configuración pueda mostrar el estado sin acceso al disco del
+ * servidor ni a la terminal.
+ */
+export const respaldosSistema = pgTable("respaldos_sistema", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  iniciadoEn: timestamp("iniciado_en", { withTimezone: true }).notNull(),
+  finalizadoEn: timestamp("finalizado_en", { withTimezone: true }),
+  estado: varchar("estado", { length: 12, enum: ["correcto", "error"] }).notNull(),
+  modo: varchar("modo", { length: 12, enum: ["programado", "manual"] }).notNull().default("programado"),
+  archivo: text("archivo").notNull(),
+  tamanoBytes: numeric("tamano_bytes", { precision: 18, scale: 0 }),
+  duracionSegundos: integer("duracion_segundos"),
+  copiaSecundariaOk: boolean("copia_secundaria_ok"),
+  servidor: text("servidor"),
+  mensaje: text("mensaje"),
+}, (table) => [
+  index("idx_respaldos_sistema_iniciado").on(table.iniciadoEn),
+  index("idx_respaldos_sistema_estado").on(table.estado),
+  check("ck_respaldos_sistema_estado", sql`${table.estado} in ('correcto', 'error')`),
+  check("ck_respaldos_sistema_modo", sql`${table.modo} in ('programado', 'manual')`),
+]);

@@ -1,6 +1,20 @@
 "use client";
 import { type FormEvent, useEffect, useState } from "react";
-import type { ConfiguracionSistema, TasaCambio } from "../shared";
+import MenuIcon from "../components/MenuIcon";
+import type { ConfiguracionSistema, EstadoRespaldos, TasaCambio } from "../shared";
+
+const ETIQUETA_SALUD: Record<EstadoRespaldos["salud"], string> = {
+  al_dia: "Al día",
+  atrasado: "Atrasado",
+  critico: "Crítico",
+  sin_datos: "Sin respaldos",
+};
+const CLASE_SALUD: Record<EstadoRespaldos["salud"], string> = {
+  al_dia: "status done",
+  atrasado: "status pending",
+  critico: "status danger",
+  sin_datos: "status danger",
+};
 
 export default function ConfiguracionInstitucional({ config, onSaved, notify }: { config: ConfiguracionSistema; onSaved: (config: ConfiguracionSistema) => void; notify: (message: string) => void }) {
   const [error, setError] = useState("");
@@ -8,6 +22,17 @@ export default function ConfiguracionInstitucional({ config, onSaved, notify }: 
   const [tasas, setTasas] = useState<TasaCambio[]>([]);
   const [tasaError, setTasaError] = useState("");
   const [savingTasa, setSavingTasa] = useState(false);
+  const [respaldos, setRespaldos] = useState<EstadoRespaldos | null>(null);
+  const [respaldosError, setRespaldosError] = useState("");
+
+  async function cargarRespaldos() {
+    try {
+      const response = await fetch("/api/respaldos");
+      const data = await response.json().catch(() => ({})) as EstadoRespaldos & { error?: string };
+      if (response.ok) setRespaldos(data);
+      else setRespaldosError(data.error ?? "No se pudo consultar el estado de los respaldos");
+    } catch { setRespaldosError("No se pudo conectar con el servicio de respaldos"); }
+  }
 
   async function cargarTasas() {
     try {
@@ -18,7 +43,7 @@ export default function ConfiguracionInstitucional({ config, onSaved, notify }: 
     } catch { setTasaError("No se pudo conectar con el servicio de tasas de cambio"); }
   }
 
-  useEffect(() => { void Promise.resolve().then(cargarTasas); }, []);
+  useEffect(() => { void Promise.resolve().then(cargarTasas); void Promise.resolve().then(cargarRespaldos); }, []);
 
   async function guardarTasa(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -93,6 +118,24 @@ export default function ConfiguracionInstitucional({ config, onSaved, notify }: 
         <td><small>{new Date(tasa.creadoEn).toLocaleString("es-NI")}{tasa.actualizadoEn ? ` · corregida ${new Date(tasa.actualizadoEn).toLocaleString("es-NI")}` : ""}</small></td>
       </tr>)}</tbody></table></div>
       {!tasas.length ? <div className="emptyReport">Todavía no hay tasas de cambio registradas.</div> : null}
+    </section>
+
+    <section className="panel formPanel">
+      <div className="panelHead compact"><div><h2>Respaldo de la base de datos</h2><p>El respaldo corre automáticamente todas las noches en el servidor. Esta pantalla solo muestra si está corriendo bien — no genera ni descarga nada desde aquí.</p></div></div>
+      {respaldosError ? <div className="authError adminError">{respaldosError}</div> : null}
+      {respaldos ? <>
+        <div className="accountHint"><MenuIcon name={respaldos.salud === "al_dia" ? "check" : "info"} className="glyphIcon"/><span>
+          <span className={CLASE_SALUD[respaldos.salud]} style={{ marginRight: 8 }}>{ETIQUETA_SALUD[respaldos.salud]}</span>
+          {respaldos.mensaje}
+        </span></div>
+        {respaldos.recientes.length ? <div className="tableWrap"><table><thead><tr><th>FECHA</th><th>MODO</th><th>ESTADO</th><th>TAMAÑO</th><th>COPIA EXTERNA</th></tr></thead><tbody>{respaldos.recientes.map(evento => <tr key={evento.id}>
+          <td><b>{new Date(evento.iniciadoEn).toLocaleString("es-NI")}</b></td>
+          <td>{evento.modo === "programado" ? "Programado" : "Manual"}</td>
+          <td><span className={evento.estado === "correcto" ? "status done" : "status danger"}>{evento.estado === "correcto" ? "Correcto" : "Error"}</span>{evento.mensaje && evento.estado === "error" ? <small style={{ display: "block" }}>{evento.mensaje}</small> : null}</td>
+          <td>{evento.tamanoBytes ? `${(Number(evento.tamanoBytes) / (1024 * 1024)).toFixed(1)} MB` : "—"}</td>
+          <td>{evento.copiaSecundariaOk === null ? "—" : evento.copiaSecundariaOk ? "Sí" : "No se pudo copiar"}</td>
+        </tr>)}</tbody></table></div> : null}
+      </> : !respaldosError ? <div className="emptyReport">Cargando estado de los respaldos…</div> : null}
     </section>
   </>;
 }
