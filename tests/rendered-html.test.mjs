@@ -51,7 +51,7 @@ test("keeps sample data out of SIC runtime files", async () => {
   assert.match(shared, /Universal Nicaragua/);
   assert.doesNotMatch(reportes, /saldo2025|saldo2026|Datos demostrativos|Ofrendas recibidas|BAC Credomatic/);
   assert.doesNotMatch(auth, /Falling back to local development/);
-  assert.match(auth, /SIC_ALLOW_LOCAL_AUTH_FALLBACK/);
+  assert.doesNotMatch(auth, /SIC_ALLOW_LOCAL_AUTH_FALLBACK/);
   assert.doesNotMatch(readme, /maqueta|prototipo funcional con datos demostrativos|Las rutas se orientan a demostración/);
 });
 
@@ -126,9 +126,12 @@ test("production auth configuration fails closed", async () => {
   ]);
 
   assert.match(auth, /esProduccion/, "el módulo debe distinguir el entorno de producción");
-  assert.match(auth, /!esProduccion\(\) && leerVariable\("SIC_ALLOW_LOCAL_AUTH_FALLBACK"\)/, "el fallback local debe quedar bloqueado en producción");
+  assert.doesNotMatch(auth, /SIC_ALLOW_LOCAL_AUTH_FALLBACK/, "el fallback local no debe existir en la autenticación");
+  assert.doesNotMatch(envExample, /SIC_ALLOW_LOCAL_AUTH_FALLBACK/, "el ejemplo de entorno no debe documentar fallback local");
   assert.match(auth, /esProduccion\(\) \? "; Secure" : ""/, "la cookie de sesión debe ser Secure en producción");
   assert.match(auth, /SIC_SESSION_SECRET no está configurado/, "producción debe exigir SIC_SESSION_SECRET");
+  assert.doesNotMatch(auth, /usuariosLocales/, "la autenticación no debe conservar usuarios locales con hashes sembrados");
+  assert.match(auth, /NODE_ENV"\)\?\.toLowerCase\(\) !== "development"/, "la ausencia de entorno debe fallar como producción");
   assert.match(login, /problemaConfiguracionSeguridad/, "el login debe rechazar una configuración insegura");
   assert.match(login, /verificarRateLimit/, "el login debe limitar intentos repetidos");
   assert.match(security, /X-Frame-Options/, "las respuestas protegidas deben bloquear iframes");
@@ -150,6 +153,25 @@ test("sensitive uploads are rate limited", async () => {
   assert.match(balanceUpload, /verificarRateLimit/, "la importación de balanza debe limitar intentos por IP");
   assert.match(catalogUpload, /verificarRateLimit/, "la importación de catálogo debe limitar intentos por IP");
   assert.match(auxiliarUpload, /verificarRateLimit/, "la importación de auxiliar debe limitar intentos por IP");
+});
+
+test("trial balance import validates against chart of accounts without rewriting it", async () => {
+  const balanceUpload = await readFile(new URL("../app/api/importaciones/balanza/route.ts", import.meta.url), "utf8");
+
+  assert.match(balanceUpload, /inArray\(cuentasContables\.codigo, codigosCuentas\)/, "la balanza debe consultar el catálogo existente");
+  assert.match(balanceUpload, /no existe en el catálogo contable/, "la balanza debe rechazar cuentas inexistentes");
+  assert.match(balanceUpload, /está inactiva/, "la balanza debe rechazar cuentas inactivas");
+  assert.match(balanceUpload, /es de mayor\/título/, "la balanza debe rechazar cuentas no imputables");
+  assert.doesNotMatch(balanceUpload, /insert\(cuentasContables\)/, "la balanza no debe crear ni actualizar cuentas contables");
+});
+
+test("rejected reconciliations can be reopened with approval permission", async () => {
+  const route = await readFile(new URL("../app/api/conciliaciones/[id]/route.ts", import.meta.url), "utf8");
+
+  assert.match(route, /reabrir_conciliacion/, "la API debe aceptar la acción para reabrir conciliaciones rechazadas");
+  assert.match(route, /conciliacion:aprobar/, "reabrir una conciliación debe exigir permiso de aprobación");
+  assert.match(route, /estado !== "rechazada"/, "solo se deben reabrir conciliaciones rechazadas");
+  assert.match(route, /Motivo reapertura/, "la reapertura debe dejar motivo en auditoría");
 });
 
 test("chart of accounts import is a dedicated function", async () => {

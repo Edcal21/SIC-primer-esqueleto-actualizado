@@ -55,15 +55,18 @@ También se puede usar `npm install` y `npm run dev`, aunque pnpm es la opción 
 
 ## Acceso de desarrollo
 
-Los usuarios locales están definidos en `lib/auth.ts`:
+La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y
+`usuarios`; la migración `0025_roles_contador_finanzas` deja activos los usuarios operativos
+`contador`, `finanzas` y `auditor`, e inactiva el usuario administrativo heredado. Las contraseñas
+sembradas son públicas por historial del proyecto y deben rotarse antes de cualquier ensayo con datos reales.
 
-| Usuario | Contraseña | Rol | Acceso |
-| --- | --- | --- | --- |
-| `contador` | `Conta2026!` | Contador | Administración del sistema, catálogo, iglesias, cierre, auditoría, importaciones, conciliación y descarga de reportes. No registra minutas. |
-| `finanzas` | `Banco2026!` | Finanzas | Registra minutas y carga reportes bancarios. No accede al centro de reportes financieros. |
-| `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |
+| Usuario | Rol | Acceso |
+| --- | --- | --- |
+| `contador` | Contador | Administración del sistema, catálogo, iglesias, cierre, auditoría, importaciones, conciliación y descarga de reportes. No registra minutas. |
+| `finanzas` | Finanzas | Registra minutas y carga reportes bancarios. No accede al centro de reportes financieros. |
+| `auditor` | Auditor general | Consulta de bancos, reportes y auditoría. |
 
-Estas credenciales son exclusivamente de desarrollo. La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y `usuarios`, y carga usuarios iniciales con hashes existentes. La aplicación exige PostgreSQL para autenticar; el fallback local de `lib/auth.ts` solo se activa si define `SIC_ALLOW_LOCAL_AUTH_FALLBACK=true`.
+La aplicación exige PostgreSQL para autenticar; no hay fallback de usuarios locales en código.
 
 ## Sesiones y seguridad
 
@@ -73,14 +76,13 @@ Estas credenciales son exclusivamente de desarrollo. La migración `0002_securit
 
 ### Configuración obligatoria de producción
 
-Declare el entorno con `SIC_ENTORNO="produccion"` (o `NODE_ENV=production`). Con ese valor el sistema:
+Declare `SIC_ENTORNO="desarrollo"` solo en estaciones locales. Si no se declara entorno, el sistema se
+comporta como producción. En modo producción:
 
 1. **Exige `SIC_SESSION_SECRET`**: debe existir, tener al menos 32 caracteres y ser distinto del valor de
    desarrollo. Si falta o es débil, `POST /api/auth/login` responde 503 con un aviso para el administrador y
    ninguna sesión existente se valida. El sistema falla cerrado: nunca firma con un secreto inseguro.
-2. **Inhabilita el fallback de usuarios locales** de `lib/auth.ts` aunque `SIC_ALLOW_LOCAL_AUTH_FALLBACK`
-   valga `"true"`. Ese fallback existe solo para trabajar sin PostgreSQL en desarrollo.
-3. **Marca la cookie de sesión como `Secure`**.
+2. **Marca la cookie de sesión como `Secure`**.
 
 Genere el secreto con:
 
@@ -88,10 +90,8 @@ Genere el secreto con:
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
 ```
 
-> **Antes del primer uso real, cambie las contraseñas de los usuarios sembrados.** La migración
-> Las migraciones crean usuarios de desarrollo (`contador`, `finanzas` y `auditor`) con las contraseñas
-> documentadas más arriba, que son públicas. El Contador puede asignar una contraseña nueva a cualquier
-> usuario desde la pantalla “Usuarios y roles”.
+> **Antes del primer uso real, cambie las contraseñas de los usuarios sembrados.** El Contador puede
+> asignar una contraseña nueva a cualquier usuario desde la pantalla “Usuarios y roles”.
 
 Quedan pendientes en infraestructura: rotación de sesiones, límite de intentos de acceso, encabezados de
 seguridad (CSP, X-Frame-Options), monitoreo, respaldos y gestión de secretos del entorno.

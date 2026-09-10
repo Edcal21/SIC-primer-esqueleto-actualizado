@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { cuentasContables, importacionesBalanza, lineasBalanza } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
@@ -11,12 +11,6 @@ const periodoRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function valorTexto(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function inferirCuenta(codigo: string) {
-  const naturaleza = codigo.startsWith("2") || codigo.startsWith("3") || codigo.startsWith("4") ? "acreedora" : "deudora";
-  const clasificacionFlujo = codigo.startsWith("1") || codigo.startsWith("4") || codigo.startsWith("5") ? "operación" : "no aplica";
-  return { naturaleza: naturaleza as "deudora" | "acreedora", clasificacionFlujo: clasificacionFlujo as "operación" | "no aplica" };
 }
 
 export async function GET(request: Request) {
@@ -65,6 +59,24 @@ export async function POST(request: Request) {
   }
 
   const { filas, totalDebe, totalHaber } = balanza;
+  const codigosCuentas = [...new Set(filas.map(fila => fila.cuentaCodigo.trim()).filter(Boolean))];
+  if (codigosCuentas.length) {
+    const cuentas = await db.select({
+      codigo: cuentasContables.codigo,
+      estado: cuentasContables.estado,
+      esCuentaMovimiento: cuentasContables.esCuentaMovimiento,
+    }).from(cuentasContables).where(inArray(cuentasContables.codigo, codigosCuentas));
+    const mapaCuentas = new Map(cuentas.map(cuenta => [cuenta.codigo, cuenta]));
+    const erroresCatalogo = filas.flatMap((fila, index) => {
+      const cuenta = mapaCuentas.get(fila.cuentaCodigo.trim());
+      if (!cuenta) return [`Línea ${index + 1}: la cuenta ${fila.cuentaCodigo} no existe en el catálogo contable`];
+      if (cuenta.estado !== "activa") return [`Línea ${index + 1}: la cuenta ${fila.cuentaCodigo} está inactiva`];
+      if (!cuenta.esCuentaMovimiento) return [`Línea ${index + 1}: la cuenta ${fila.cuentaCodigo} es de mayor/título; la balanza solo admite cuentas de movimiento`];
+      return [];
+    });
+    if (erroresCatalogo.length) return jsonError(`Catálogo contable inválido para la balanza. ${erroresCatalogo.slice(0, 5).join(" · ")}`, 400);
+  }
+
   const diferencia = totalDebe - totalHaber;
   const estado = Math.abs(diferencia) < 0.01 ? "procesado" : "con_diferencias";
 
@@ -84,27 +96,6 @@ export async function POST(request: Request) {
       const lineas = await tx.insert(lineasBalanza).values(
         filas.map(fila => ({ ...fila, importacionId: importacion.id })),
       ).returning();
-      for (const fila of filas) {
-        if (!/^\d{8}$/.test(fila.cuentaCodigo)) continue;
-        const cuenta = inferirCuenta(fila.cuentaCodigo);
-        await tx.insert(cuentasContables).values({
-          codigo: fila.cuentaCodigo,
-          descripcion: fila.cuentaNombre,
-          nivel: 5,
-          esCuentaMovimiento: true,
-          naturaleza: cuenta.naturaleza,
-          clasificacionFlujo: cuenta.clasificacionFlujo,
-        }).onConflictDoUpdate({
-          target: cuentasContables.codigo,
-          set: {
-            descripcion: fila.cuentaNombre,
-            esCuentaMovimiento: true,
-            estado: "activa",
-            naturaleza: cuenta.naturaleza,
-            clasificacionFlujo: cuenta.clasificacionFlujo,
-          },
-        });
-      }
       await registrarAuditoria(tx, {
         user,
         modulo: "Importaciones",

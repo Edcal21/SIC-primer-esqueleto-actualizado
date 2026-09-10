@@ -11,19 +11,6 @@ export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar"
 export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[] };
 type UsuarioInterno = UsuarioSesion & { salt: string; passwordHash: string };
 
-const permisosPorRol: Record<RolId, Permiso[]> = {
-  administrador: ["panel:ver", "usuarios:administrar", "roles:administrar", "catalogo:administrar", "iglesias:administrar", "auditoria:ver", "configuracion:administrar", "banco:ver", "conciliacion:aprobar"],
-  contador_general: ["panel:ver", "usuarios:administrar", "roles:administrar", "catalogo:administrar", "iglesias:administrar", "banco:ver", "conciliacion:ver", "conciliacion:gestionar", "conciliacion:aprobar", "importaciones:administrar", "reportes:ver", "reportes:descargar", "auditoria:ver", "configuracion:administrar"],
-  operador_bancario: ["panel:ver", "movimientos:escribir", "banco:ver", "banco:cargar"],
-  auditor_general: ["panel:ver", "banco:ver", "conciliacion:ver", "reportes:ver", "reportes:descargar", "auditoria:ver"],
-};
-
-const usuariosLocales: UsuarioInterno[] = [
-  { id: "usr-contador", usuario: "contador", nombre: "Contador General", rol: "contador_general", permisos: permisosPorRol.contador_general, salt: "b04259fa5a05cd95fda1a4af06b926d8", passwordHash: "a84233f4147da5048daef1e3d0d875df1d9ad96a9b77b35c399001793f9b5253" },
-  { id: "usr-banco", usuario: "finanzas", nombre: "Finanzas", rol: "operador_bancario", permisos: permisosPorRol.operador_bancario, salt: "cd15b6c7a108464a98ed72733da083aa", passwordHash: "07ec8bed948731f1ccb8d4f5e49ac38ed62eab2f213cbb120950d2f9233525cc" },
-  { id: "usr-auditor", usuario: "auditor", nombre: "Auditor General", rol: "auditor_general", permisos: permisosPorRol.auditor_general, salt: "1ae524d779667e6470265d096ab2efec", passwordHash: "563dff2b46b224cec7a76817f514431c2167f0a7c05ca16db989ba01013670ba" },
-];
-
 const COOKIE = "sic_session";
 const SESSION_SECONDS = 60 * 60 * 8;
 const SECRETO_DESARROLLO = "sic-local-development-secret-change-in-production";
@@ -40,7 +27,7 @@ function leerVariable(clave: string): string | undefined {
 export function esProduccion() {
   const entorno = leerVariable("SIC_ENTORNO")?.toLowerCase();
   if (entorno) return entorno === "produccion" || entorno === "production";
-  return leerVariable("NODE_ENV")?.toLowerCase() === "production";
+  return leerVariable("NODE_ENV")?.toLowerCase() !== "development";
 }
 
 /**
@@ -63,8 +50,6 @@ function secret() {
 }
 
 const sign = (value: string) => createHmac("sha256", secret()).update(value).digest("base64url");
-/** El fallback de usuarios locales queda inhabilitado en producción aunque la bandera esté activa. */
-const allowLocalFallback = () => !esProduccion() && leerVariable("SIC_ALLOW_LOCAL_AUTH_FALLBACK") === "true";
 const atributosCookie = () => `Path=/; HttpOnly; SameSite=Strict${esProduccion() ? "; Secure" : ""}`;
 
 async function usuarioDesdeDbPorUsuario(usuario: string): Promise<UsuarioInterno | null> {
@@ -97,36 +82,12 @@ async function usuarioDesdeDbPorId(id: string): Promise<UsuarioSesion | null> {
   };
 }
 
-function usuarioLocalPorUsuario(usuario: string): UsuarioInterno | null {
-  return usuariosLocales.find(item => item.usuario === usuario.trim().toLowerCase()) ?? null;
-}
-
-function usuarioLocalPorId(id: string): UsuarioSesion | null {
-  const found = usuariosLocales.find(item => item.id === id);
-  if (!found) return null;
-  const { salt: _salt, passwordHash: _passwordHash, ...safeUser } = found;
-  void _salt; void _passwordHash;
-  return safeUser;
-}
-
 async function resolverUsuarioPorUsuario(usuario: string): Promise<UsuarioInterno | null> {
-  try {
-    return await usuarioDesdeDbPorUsuario(usuario);
-  } catch (error) {
-    if (!allowLocalFallback()) throw error;
-    console.warn("Using local development users because SIC_ALLOW_LOCAL_AUTH_FALLBACK=true", error);
-    return usuarioLocalPorUsuario(usuario);
-  }
+  return await usuarioDesdeDbPorUsuario(usuario);
 }
 
 async function resolverUsuarioPorId(id: string): Promise<UsuarioSesion | null> {
-  try {
-    return await usuarioDesdeDbPorId(id);
-  } catch (error) {
-    if (!allowLocalFallback()) throw error;
-    console.warn("Using local development session users because SIC_ALLOW_LOCAL_AUTH_FALLBACK=true", error);
-    return usuarioLocalPorId(id);
-  }
+  return await usuarioDesdeDbPorId(id);
 }
 
 export async function autenticar(usuario: string, password: string): Promise<UsuarioSesion | null> {
