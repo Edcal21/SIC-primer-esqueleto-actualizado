@@ -25,6 +25,35 @@ function ModuleLoading() {
   return <div className="reportLoadingOverlay moduleLoading" role="status" aria-live="polite"><span className="spinner" aria-hidden="true"/><span className="loadingText">CARGANDO MÓDULO</span></div>;
 }
 
+function PasswordChangeRequired({ user, config, onChanged, logout }: { user: User; config: ConfiguracionSistema; onChanged: () => Promise<void>; logout: () => Promise<void> }) {
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const nueva = String(form.get("nueva") ?? "");
+    const confirmar = String(form.get("confirmar") ?? "");
+    if (nueva !== confirmar) {
+      setSaving(false);
+      return setError("La confirmación no coincide con la nueva contraseña");
+    }
+    const response = await fetch("/api/auth/password", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actual: form.get("actual"), nueva }),
+    });
+    const result = await response.json();
+    setSaving(false);
+    if (!response.ok) return setError(result.error ?? "No se pudo cambiar la contraseña");
+    await onChanged();
+  }
+
+  return <main className="authScreen"><section className="authCard"><div className="authBrand institutional"><span className="authLogo" style={{ backgroundImage: `url(${config.logoLogin})` }} role="img" aria-label={config.institucionNombre}/><div><b>{config.sistemaNombre}</b><small>{config.institucionNombre}</small></div></div><span className="eyebrow">ACCESO SEGURO</span><h1>Cambiar contraseña</h1><p>{user.nombre}, debe establecer una contraseña nueva antes de continuar.</p><form onSubmit={submit}><label>Contraseña actual<input name="actual" type="password" autoComplete="current-password" required placeholder="Contraseña actual"/></label><label>Nueva contraseña<input name="nueva" type="password" autoComplete="new-password" required minLength={12} placeholder="Mínimo 12 caracteres"/></label><label>Confirmar nueva contraseña<input name="confirmar" type="password" autoComplete="new-password" required minLength={12} placeholder="Repita la nueva contraseña"/></label>{error ? <div className="authError" role="alert">{error}</div> : null}<button className="primary" type="submit" disabled={saving}>{saving ? "Guardando..." : "Cambiar contraseña"}</button><button className="linkButton" type="button" onClick={logout}>Cerrar sesión</button></form></section></main>;
+}
+
 const moduleSlug = (name: string) => name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const moduleFromHash = (allowedNames: string[]) => {
   if (typeof window === "undefined") return null;
@@ -72,6 +101,13 @@ export default function Home() {
   }
 
   async function logout() { await fetch("/api/auth/logout", { method: "POST" }); setUser(null); setActiveModule("Resumen"); }
+  async function refreshSession() {
+    const response = await fetch("/api/auth/me");
+    if (!response.ok) { setUser(null); return; }
+    const currentUser = (await response.json()).user as User;
+    setUser(currentUser);
+    setActiveModule(moduleFromHash(allowedNamesForUser(currentUser)) ?? defaultModuleForUser(currentUser));
+  }
   async function confirmModal() {
     if (!modal || modalBusy) return;
     setModalBusy(true);
@@ -104,6 +140,7 @@ export default function Home() {
 
   if (checking) return <main className="authScreen"><div className="authCard"><b>Validando sesión…</b></div></main>;
   if (!user) return <Login onSubmit={login} error={error} config={config}/>;
+  if (user.debeCambiarPassword) return <PasswordChangeRequired user={user} config={config} onChanged={refreshSession} logout={logout}/>;
   const allowedMenu = menu.filter(item => can(item.permiso));
 
   return <main className="shell">

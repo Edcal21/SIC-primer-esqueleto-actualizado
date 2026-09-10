@@ -52,6 +52,7 @@ También se puede usar `npm install` y `npm run dev`, aunque pnpm es la opción 
 | `pnpm db:migrate` | Aplica las migraciones pendientes a PostgreSQL. |
 | `pnpm db:push` | Sincroniza el esquema directamente durante desarrollo. |
 | `pnpm db:studio` | Abre Drizzle Studio para inspeccionar los datos. |
+| `pnpm deploy` | Construye el proyecto y publica el Worker con Wrangler. |
 
 ## Acceso de desarrollo
 
@@ -93,8 +94,27 @@ node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'
 > **Antes del primer uso real, cambie las contraseñas de los usuarios sembrados.** El Contador puede
 > asignar una contraseña nueva a cualquier usuario desde la pantalla “Usuarios y roles”.
 
-Quedan pendientes en infraestructura: rotación de sesiones, límite de intentos de acceso, encabezados de
-seguridad (CSP, X-Frame-Options), monitoreo, respaldos y gestión de secretos del entorno.
+Quedan pendientes en infraestructura: rotación de sesiones, monitoreo, respaldos y gestión operacional del
+entorno.
+
+## Salida a producción
+
+El repositorio incluye `wrangler.jsonc` con `SIC_ENTORNO="produccion"`, `nodejs_compat`, assets y
+observabilidad habilitada. Antes de publicar configure secretos reales:
+
+```bash
+wrangler secret put DATABASE_URL
+wrangler secret put SIC_SESSION_SECRET
+```
+
+Luego publique con:
+
+```bash
+pnpm deploy
+```
+
+Use [docs/checklist-produccion.md](docs/checklist-produccion.md) para el recorrido completo de base de datos,
+rotación de contraseñas, QA por rol y validación posterior al deploy.
 
 ## Base de datos y catálogo
 

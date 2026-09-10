@@ -63,6 +63,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { salt, passwordHash } = hashPassword(body.password);
     values.salt = salt;
     values.passwordHash = passwordHash;
+    values.debeCambiarPassword = true;
     cambioPassword = true;
   }
   if (!Object.keys(values).length) return jsonError("No hay cambios para aplicar", 400);
@@ -74,6 +75,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     nombre: usuarios.nombre,
     rolId: usuarios.rolId,
     estado: usuarios.estado,
+    debeCambiarPassword: usuarios.debeCambiarPassword,
     creadoEn: usuarios.creadoEn,
   });
 

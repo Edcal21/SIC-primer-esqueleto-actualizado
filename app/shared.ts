@@ -1,5 +1,5 @@
 export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:ver" | "conciliacion:gestionar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
-export type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
+export type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[]; debeCambiarPassword?: boolean };
 export type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string; cuentaBancariaNumero?: string | null; periodoInicio?: string | null; periodoFin?: string | null; totalLineas?: number; totalDebitos?: string; totalCreditos?: string; mensajeError?: string | null; conciliacionId?: string | null; conciliacionEstado?: string | null };
 export type LineaBanco = { id: string; numeroLinea: number; fecha: string | null; referencia: string | null; descripcion: string; debito: string; credito: string; saldo: string | null; moneda: "USD" | "NIO"; tasaCambio: string | null; debitoNio: string | null; creditoNio: string | null; estadoConciliacion: "pendiente" | "conciliada" | "descartada"; movimientoId: string | null };
 export type MovimientoConciliable = { id: string; fecha: string; referencia: string | null; concepto: string; monto: number; montoOriginal: number; moneda: "USD" | "NIO"; sentido: "entrada" | "salida" | null; completo: boolean; lineaId: string | null };
@@ -25,7 +25,7 @@ export type ImportacionBalanza = { id: string; archivoNombre: string; archivoTam
 export type ImportacionSituacionFinanciera = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "error"; totalLineas: number; creadoEn: string };
 export type PermisoAdmin = { id: Permiso; descripcion: string };
 export type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
-export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
+export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; debeCambiarPassword?: boolean; creadoEn: string; rolNombre?: string | null };
 export type Iglesia = { codigo: string; nombre: string; estado?: "activa" | "inactiva" };
 export type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO"; estado?: "activa" | "inactiva" };
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";

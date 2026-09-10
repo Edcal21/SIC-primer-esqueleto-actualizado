@@ -50,6 +50,7 @@ export const usuarios = pgTable("usuarios", {
   rolId: varchar("rol_id", { length: 40 }).notNull().references(() => roles.id),
   salt: varchar("salt", { length: 32 }).notNull(),
   passwordHash: varchar("password_hash", { length: 64 }).notNull(),
+  debeCambiarPassword: boolean("debe_cambiar_password").notNull().default(false),
   estado: varchar("estado", { length: 8, enum: ["activo", "inactivo"] }).notNull().default("activo"),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [

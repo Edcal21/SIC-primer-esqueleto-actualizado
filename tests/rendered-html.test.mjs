@@ -118,11 +118,15 @@ test("bank statements and reconciliation persist to PostgreSQL", async () => {
 });
 
 test("production auth configuration fails closed", async () => {
-  const [auth, login, security, envExample] = await Promise.all([
+  const [auth, login, passwordRoute, security, envExample, wrangler, packageJson, checklist] = await Promise.all([
     readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/password/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/security.ts", import.meta.url), "utf8"),
     readFile(new URL("../.dev.vars.example", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../docs/checklist-produccion.md", import.meta.url), "utf8"),
   ]);
 
   assert.match(auth, /esProduccion/, "el módulo debe distinguir el entorno de producción");
@@ -131,14 +135,22 @@ test("production auth configuration fails closed", async () => {
   assert.match(auth, /esProduccion\(\) \? "; Secure" : ""/, "la cookie de sesión debe ser Secure en producción");
   assert.match(auth, /SIC_SESSION_SECRET no está configurado/, "producción debe exigir SIC_SESSION_SECRET");
   assert.doesNotMatch(auth, /usuariosLocales/, "la autenticación no debe conservar usuarios locales con hashes sembrados");
+  assert.match(auth, /debeCambiarPassword \? \[\] : permisos/, "los usuarios pendientes de rotar contraseña no deben recibir permisos operativos");
   assert.match(auth, /NODE_ENV"\)\?\.toLowerCase\(\) !== "development"/, "la ausencia de entorno debe fallar como producción");
   assert.match(login, /problemaConfiguracionSeguridad/, "el login debe rechazar una configuración insegura");
+  assert.match(passwordRoute, /PASSWORD_MINIMO = 12/, "el cambio de contraseña debe exigir mínimo 12 caracteres");
+  assert.match(passwordRoute, /actual === nueva/, "la nueva contraseña debe ser distinta");
+  assert.match(passwordRoute, /debeCambiarPassword: false/, "el cambio propio debe limpiar la rotación obligatoria");
   assert.match(login, /verificarRateLimit/, "el login debe limitar intentos repetidos");
   assert.match(security, /X-Frame-Options/, "las respuestas protegidas deben bloquear iframes");
   assert.match(security, /Content-Security-Policy/, "las respuestas protegidas deben incluir CSP");
   assert.match(security, /status: 429/, "el rate limit debe responder 429 cuando se excede");
   assert.match(envExample, /SIC_ENTORNO/);
   assert.match(envExample, /SIC_SESSION_SECRET/);
+  assert.match(wrangler, /"SIC_ENTORNO": "produccion"/, "Wrangler debe declarar producción");
+  assert.match(wrangler, /"nodejs_compat"/, "Wrangler debe habilitar compatibilidad Node.js");
+  assert.match(packageJson, /"deploy": "pnpm build && cross-env WRANGLER_LOG_PATH=\.wrangler\/wrangler\.log wrangler deploy --config wrangler\.jsonc"/, "debe existir script de despliegue");
+  assert.match(checklist, /QA por rol con usuario final/, "debe existir checklist de QA por rol");
 });
 
 test("sensitive uploads are rate limited", async () => {

@@ -13,6 +13,7 @@ type UsuarioPayload = {
 };
 
 const usuarioRegex = /^[a-z0-9._-]{3,40}$/;
+const PASSWORD_MINIMO = 12;
 
 function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -41,6 +42,7 @@ export async function GET(request: Request) {
       nombre: usuarios.nombre,
       rolId: usuarios.rolId,
       estado: usuarios.estado,
+      debeCambiarPassword: usuarios.debeCambiarPassword,
       creadoEn: usuarios.creadoEn,
       rolNombre: roles.nombre,
     })
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
   if (!usuario || !usuarioRegex.test(usuario)) return jsonError("Usuario inválido; use 3 a 40 caracteres en minúsculas, números, punto, guion o guion bajo", 400);
   if (!nombre) return jsonError("Nombre es obligatorio", 400);
   if (!rolId) return jsonError("Rol es obligatorio", 400);
-  if (password.length < 8) return jsonError("La contraseña debe tener al menos 8 caracteres", 400);
+  if (password.length < PASSWORD_MINIMO) return jsonError(`La contraseña debe tener al menos ${PASSWORD_MINIMO} caracteres`, 400);
 
   const db = getDb();
   const [rol] = await db.select({ id: roles.id }).from(roles).where(eq(roles.id, rolId)).limit(1);
@@ -81,12 +83,14 @@ export async function POST(request: Request) {
       rolId,
       salt,
       passwordHash,
+      debeCambiarPassword: true,
     }).returning({
       id: usuarios.id,
       usuario: usuarios.usuario,
       nombre: usuarios.nombre,
       rolId: usuarios.rolId,
       estado: usuarios.estado,
+      debeCambiarPassword: usuarios.debeCambiarPassword,
       creadoEn: usuarios.creadoEn,
     });
 

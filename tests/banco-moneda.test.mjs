@@ -59,6 +59,9 @@ async function limpiar() {
 
 before(async () => {
   await limpiar();
+  await db.update(schema.usuarios).set({ debeCambiarPassword: false }).where(eq(schema.usuarios.id, USUARIO_ADMIN));
+  await db.update(schema.usuarios).set({ debeCambiarPassword: false }).where(eq(schema.usuarios.id, "usr-contador"));
+  await db.update(schema.usuarios).set({ debeCambiarPassword: false }).where(eq(schema.usuarios.id, "usr-banco"));
   await db.insert(schema.iglesias).values({ codigo: IGLESIA, nombre: "Iglesia de prueba" });
   await db.insert(schema.cuentasBancarias).values([
     { numeroCuenta: CUENTA_USD, nombre: "Cuenta USD de prueba A", moneda: "USD" },
