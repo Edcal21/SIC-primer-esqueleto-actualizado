@@ -59,9 +59,8 @@ Los usuarios locales están definidos en `lib/auth.ts`:
 
 | Usuario | Contraseña | Rol | Acceso |
 | --- | --- | --- | --- |
-| `administrador` | `Admin2026!` | Administrador | Administración de usuarios, roles y auditoría. |
-| `contador` | `Conta2026!` | Contador general | Movimientos, catálogo, bancos, importaciones y reportes. |
-| `banco` | `Banco2026!` | Operador bancario | Consulta y carga de archivos bancarios. |
+| `contador` | `Conta2026!` | Contador | Administración del sistema, catálogo, iglesias, cierre, auditoría, importaciones, conciliación y descarga de reportes. No registra minutas. |
+| `finanzas` | `Banco2026!` | Finanzas | Registra minutas y carga reportes bancarios. No accede al centro de reportes financieros. |
 | `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |
 
 Estas credenciales son exclusivamente de desarrollo. La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y `usuarios`, y carga usuarios iniciales con hashes existentes. La aplicación exige PostgreSQL para autenticar; el fallback local de `lib/auth.ts` solo se activa si define `SIC_ALLOW_LOCAL_AUTH_FALLBACK=true`.
@@ -90,8 +89,8 @@ node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'
 ```
 
 > **Antes del primer uso real, cambie las contraseñas de los usuarios sembrados.** La migración
-> `0002_security_users_roles` crea `administrador`, `contador`, `banco` y `auditor` con las contraseñas
-> documentadas más arriba, que son públicas. Un administrador puede asignar una contraseña nueva a cualquier
+> Las migraciones crean usuarios de desarrollo (`contador`, `finanzas` y `auditor`) con las contraseñas
+> documentadas más arriba, que son públicas. El Contador puede asignar una contraseña nueva a cualquier
 > usuario desde la pantalla “Usuarios y roles”.
 
 Quedan pendientes en infraestructura: rotación de sesiones, límite de intentos de acceso, encabezados de
@@ -174,7 +173,7 @@ registradas en `movimientos_cuentas` para esa misma cuenta bancaria y período:
 Al generarla, el sistema enlaza automáticamente solo las líneas con una **única** minuta coincidente por
 monto y fecha; nunca decide entre empates. El resto se enlaza o descarta manualmente. Una conciliación
 solo puede aprobarse cuando no quedan líneas pendientes, y aprobarla o rechazarla exige el permiso
-`conciliacion:aprobar`, separado del permiso de carga `banco:cargar` para mantener segregación de funciones.
+`conciliacion:gestionar`/`conciliacion:aprobar`, separados del permiso de carga `banco:cargar` para mantener segregación de funciones.
 Cada enlace, descarte, aprobación y rechazo queda registrado en auditoría.
 
 La migración `0017_conciliacion_bancaria` crea `lineas_reporte_bancario` y `conciliaciones_bancarias`,

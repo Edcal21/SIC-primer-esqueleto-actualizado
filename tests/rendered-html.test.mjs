@@ -107,6 +107,7 @@ test("bank statements and reconciliation persist to PostgreSQL", async () => {
   assert.match(carga, /leerEstadoBancario/, "la carga bancaria debe procesar el contenido del archivo");
   assert.match(carga, /insert\(lineasReporteBancario\)/, "las líneas del estado de cuenta deben guardarse");
   assert.match(carga, /puede\(user, "banco:cargar"\)/);
+  assert.match(conciliacion, /puede\(user, "conciliacion:gestionar"\)/, "gestionar líneas de conciliación usa un permiso separado de la carga bancaria");
   assert.match(conciliacion, /puede\(user, "conciliacion:aprobar"\)/, "aprobar conciliaciones exige el permiso correspondiente");
   assert.match(conciliacion, /registrarAuditoria/, "las acciones de conciliación deben auditarse");
   assert.match(conciliacionUi, /canReconcile && canApprove/, "la interfaz debe advertir cuando un usuario concentra conciliación y aprobación");

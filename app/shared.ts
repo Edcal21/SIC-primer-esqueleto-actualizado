@@ -1,4 +1,4 @@
-export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
+export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:ver" | "conciliacion:gestionar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
 export type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
 export type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string; cuentaBancariaNumero?: string | null; periodoInicio?: string | null; periodoFin?: string | null; totalLineas?: number; totalDebitos?: string; totalCreditos?: string; mensajeError?: string | null; conciliacionId?: string | null; conciliacionEstado?: string | null };
 export type LineaBanco = { id: string; numeroLinea: number; fecha: string | null; referencia: string | null; descripcion: string; debito: string; credito: string; saldo: string | null; moneda: "USD" | "NIO"; tasaCambio: string | null; debitoNio: string | null; creditoNio: string | null; estadoConciliacion: "pendiente" | "conciliada" | "descartada"; movimientoId: string | null };
@@ -43,7 +43,7 @@ export type OpcionReporte = { tipo: TipoReporte; titulo: string; descripcion: st
 export type ModalState = { title: string; message: string; confirmLabel?: string; onConfirm: () => void | Promise<void>; isDanger?: boolean };
 export type RequestConfirmation = (modal: ModalState) => void;
 
-export const nombresRol = { administrador: "Administrador", contador_general: "Contador general", operador_bancario: "Operador bancario", auditor_general: "Auditor general" };
+export const nombresRol = { administrador: "Administrador", contador_general: "Contador", operador_bancario: "Finanzas", auditor_general: "Auditor general" };
 export const etiquetasPermiso: Record<Permiso, string> = {
   "panel:ver": "Ver panel",
   "usuarios:administrar": "Administrar usuarios",
@@ -53,6 +53,8 @@ export const etiquetasPermiso: Record<Permiso, string> = {
   "iglesias:administrar": "Administrar iglesias",
   "banco:ver": "Ver bancos",
   "banco:cargar": "Cargar reportes bancarios",
+  "conciliacion:ver": "Ver conciliación",
+  "conciliacion:gestionar": "Gestionar conciliación",
   "conciliacion:aprobar": "Aprobar conciliación",
   "importaciones:administrar": "Importar estados financieros",
   "reportes:ver": "Ver reportes",
@@ -68,7 +70,7 @@ export const menu = [
   { nombre: "Catálogo contable", permiso: "catalogo:administrar" as Permiso, icono: "catalog" },
   { nombre: "Iglesias", permiso: "iglesias:administrar" as Permiso, icono: "church" },
   { nombre: "Bancos", permiso: "banco:ver" as Permiso, icono: "bank" },
-  { nombre: "Conciliación", permiso: "banco:ver" as Permiso, icono: "reconcile" },
+  { nombre: "Conciliación", permiso: "conciliacion:ver" as Permiso, icono: "reconcile" },
   { nombre: "Importaciones", permiso: "importaciones:administrar" as Permiso, icono: "upload" },
   { nombre: "Reportes", permiso: "reportes:ver" as Permiso, icono: "reports" },
   { nombre: "Auditoría", permiso: "auditoria:ver" as Permiso, icono: "audit" },

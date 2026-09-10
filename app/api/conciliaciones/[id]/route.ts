@@ -54,7 +54,7 @@ async function detalle(db: ReturnType<typeof getDb>, id: string) {
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
-  if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
+  if (!puede(user, "conciliacion:ver")) return jsonError("Permiso insuficiente", 403);
 
   const { id } = await params;
   const db = getDb();
@@ -75,7 +75,7 @@ async function actualizarLinea(
   accion: Extract<AccionConciliacion, "conciliar" | "descartar" | "reabrir">,
   body: ConciliacionUpdatePayload,
 ) {
-  if (!puede(user, "banco:cargar")) return jsonError("No tiene permiso para modificar líneas de conciliación", 403);
+  if (!puede(user, "conciliacion:gestionar")) return jsonError("No tiene permiso para modificar líneas de conciliación", 403);
   if (conciliacion.estado !== "borrador") return jsonError("La conciliación ya fue revisada y no admite cambios", 409);
 
   const periodoCerradoLinea = await primerPeriodoCerrado(db, [conciliacion.periodo]);
@@ -205,7 +205,7 @@ async function revisar(
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
-  if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
+  if (!puede(user, "conciliacion:ver")) return jsonError("Permiso insuficiente", 403);
 
   const { id } = await params;
   let body: ConciliacionUpdatePayload;

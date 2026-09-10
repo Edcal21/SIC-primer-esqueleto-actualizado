@@ -92,7 +92,7 @@ export default function Home() {
       case "Catálogo contable": return <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Iglesias": return <IglesiasAdmin notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Bancos": return <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/>;
-      case "Conciliación": return <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/>;
+      case "Conciliación": return <ConciliacionBancaria canReconcile={can("conciliacion:gestionar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Importaciones": return <Importaciones notify={notify}/>;
       case "Reportes": return <Reportes canDownload={can("reportes:descargar")}/>;
       case "Auditoría": return <Auditoria/>;

@@ -12,7 +12,7 @@ type ConciliacionPayload = { reporteId?: string };
 export async function GET(request: Request) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
-  if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
+  if (!puede(user, "conciliacion:ver")) return jsonError("Permiso insuficiente", 403);
 
   const db = getDb();
   try {
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
-  if (!puede(user, "banco:cargar")) return jsonError("No tiene permiso para generar conciliaciones", 403);
+  if (!puede(user, "conciliacion:gestionar")) return jsonError("No tiene permiso para generar conciliaciones", 403);
 
   let body: ConciliacionPayload;
   try { body = await request.json(); } catch { return jsonError("Solicitud inválida", 400); }

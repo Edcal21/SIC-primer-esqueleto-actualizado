@@ -291,7 +291,7 @@ async function rutas() {
     import('../app/api/movimientos/[id]/route.ts'),
     import('../lib/auth.ts'),
   ]);
-  const enviar = (fn, id, body, usuario = 'usr-banco') => fn(new Request('http://localhost/api/test', {
+  const enviar = (fn, id, body, usuario = 'usr-contador') => fn(new Request('http://localhost/api/test', {
     method:'PATCH', headers:{'Content-Type':'application/json', cookie:crearCookieSesion({id:usuario}).split(';')[0]}, body:JSON.stringify(body),
   }), {params:Promise.resolve({id})});
   return {conciliar,anular,enviar};
@@ -304,7 +304,7 @@ async function escenario(nombre, legado = false) {
   }) : await crearMovimientoUsd('2026-03-10','100.00','36.5',nombre);
   const [reporte] = await db.insert(schema.reportesBancarios).values({nombre,fecha:'2026-03-10',estado:'procesado',archivoTamano:1,cargadoPor:USUARIO_ADMIN,cargadoPorNombre:'Test',cuentaBancariaNumero:CUENTA_USD,periodoInicio:'2026-03-10',periodoFin:'2026-03-10'}).returning();
   const [linea] = await db.insert(schema.lineasReporteBancario).values({reporteId:reporte.id,numeroLinea:1,fecha:'2026-03-10',descripcion:nombre,credito:'100',debito:'0',moneda:'USD',tasaCambio:'36.5',creditoNio:'3650',debitoNio:'0'}).returning();
-  const [conciliacion] = await db.insert(schema.conciliacionesBancarias).values({reporteId:reporte.id,cuentaBancariaNumero:CUENTA_USD,periodo:'2026-03',creadoPor:'usr-banco'}).returning();
+  const [conciliacion] = await db.insert(schema.conciliacionesBancarias).values({reporteId:reporte.id,cuentaBancariaNumero:CUENTA_USD,periodo:'2026-03',creadoPor:'usr-contador'}).returning();
   return {movimiento,reporte,linea,conciliacion};
 }
 
@@ -315,14 +315,14 @@ test('USD histórico no enlaza manualmente ni permite aprobar un enlace inválid
   assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar' ,lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,409);
   // Simular un enlace incorrecto previo a la corrección.
   await db.update(schema.lineasReporteBancario).set({estadoConciliacion:'conciliada',movimientoId:e.movimiento.id}).where(eq(schema.lineasReporteBancario.id,e.linea.id));
-  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin')).status,409);
+  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-contador')).status,409);
 });
 
 test('anular y conciliar concurrentemente no deja una minuta anulada enlazada', async () => {
   const e = await escenario('CARRERA-ANULAR');
   const {conciliar,anular,enviar} = await rutas();
   const resultados = await Promise.all([
-    enviar(anular,e.movimiento.id,{estado:'anulado',motivo:'Prueba concurrente de anulación'}),
+    enviar(anular,e.movimiento.id,{estado:'anulado',motivo:'Prueba concurrente de anulación'},'usr-banco'),
     enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id}),
   ]);
   assert.equal(resultados.filter(r=>r.status===200).length,1);
@@ -337,7 +337,7 @@ test('reabrir y aprobar simultáneamente mantienen estado coherente', async () =
   assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,200);
   const resultados = await Promise.all([
     enviar(conciliar,e.conciliacion.id,{accion:'reabrir',lineaId:e.linea.id}),
-    enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin'),
+    enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-contador'),
   ]);
   assert.equal(resultados.filter(r=>r.status===200).length,1);
   const [c] = await db.select().from(schema.conciliacionesBancarias).where(eq(schema.conciliacionesBancarias.id,e.conciliacion.id));
@@ -349,7 +349,7 @@ test('dos aprobaciones simultáneas producen una transición y un evento', async
   const e = await escenario('CARRERA-APROBAR');
   const {conciliar,enviar} = await rutas();
   assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,200);
-  const resultados = await Promise.all([1,2].map(()=>enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin')));
+  const resultados = await Promise.all([1,2].map(()=>enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-contador')));
   assert.deepEqual(resultados.map(r=>r.status).sort(),[200,409]);
   const eventos = await db.select().from(schema.auditoriaEventos).where(and(eq(schema.auditoriaEventos.entidadId,e.conciliacion.id),eq(schema.auditoriaEventos.accion,'Aprobó conciliación bancaria')));
   assert.equal(eventos.length,1);
@@ -374,7 +374,7 @@ test('auto-enlace y anulación concurrentes conservan integridad', async () => {
   const {anular,enviar} = await rutas();
   await Promise.all([
     autoConciliar(db,e.reporte.id,CUENTA_USD,'usr-banco'),
-    enviar(anular,e.movimiento.id,{estado:'anulado',motivo:'Anulación simultánea con automático'}),
+    enviar(anular,e.movimiento.id,{estado:'anulado',motivo:'Anulación simultánea con automático'},'usr-banco'),
   ]);
   const [m] = await db.select().from(schema.movimientosCuentas).where(eq(schema.movimientosCuentas.id,e.movimiento.id));
   const [l] = await db.select().from(schema.lineasReporteBancario).where(eq(schema.lineasReporteBancario.id,e.linea.id));
