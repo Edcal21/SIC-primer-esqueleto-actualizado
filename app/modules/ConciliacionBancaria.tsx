@@ -108,6 +108,28 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
     });
   }
 
+  function reabrirConciliacion() {
+    if (!detalle) return;
+    if (observaciones.trim().length < 10) return setError("Indique el motivo de reapertura con al menos 10 caracteres");
+    requestConfirmation({
+      title: "Reabrir conciliación rechazada",
+      message: `La conciliación del período ${detalle.conciliacion.periodo} volverá a borrador para corregirla. El motivo quedará registrado en auditoría.`,
+      confirmLabel: "Reabrir conciliación",
+      onConfirm: async () => {
+        const response = await fetch(`/api/conciliaciones/${detalle.conciliacion.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accion: "reabrir_conciliacion", observaciones: observaciones.trim() }),
+        });
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        if (!response.ok) return setError(result.error ?? "No se pudo reabrir la conciliación");
+        await cargarDetalle(detalle.conciliacion.id);
+        await cargarLista();
+        notify("Conciliación reabierta para corrección");
+      },
+    });
+  }
+
   const conciliacion = detalle?.conciliacion;
   const editable = Boolean(conciliacion && conciliacion.estado === "borrador" && canReconcile);
   const disponiblesMovimientos = (detalle?.movimientos ?? []).filter(movimiento => !movimiento.lineaId);
@@ -117,6 +139,7 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
     const coincideEstado = estadoLineas === "todas" || linea.estadoConciliacion === estadoLineas;
     return coincideTexto && coincideEstado;
   });
+  const conteoLineas = (detalle?.lineas ?? []).reduce<Record<LineaBanco["estadoConciliacion"], number>>((acc, linea) => ({ ...acc, [linea.estadoConciliacion]: acc[linea.estadoConciliacion] + 1 }), { pendiente: 0, conciliada: 0, descartada: 0 });
 
   function movimientoCell(linea: LineaConciliacion) {
     if (linea.movimiento) {
@@ -177,7 +200,11 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
           {canApprove && conciliacion.estado === "borrador" ? <div className="reviewActions"><label>Observaciones<textarea value={observaciones} onChange={event => setObservaciones(event.target.value)} rows={2} placeholder="Obligatorias para rechazar"/></label><div className="reportActions"><button className="secondary" type="button" onClick={() => revisar("rechazar")}>Rechazar</button><button className="primary" type="button" onClick={() => revisar("aprobar")} disabled={conciliacion.lineasPendientes > 0}>Aprobar conciliación</button></div></div> : null}
         </div>
         {conciliacion.estado !== "borrador" ? <div className="readOnlyBanner">Conciliación {conciliacion.estado} por {conciliacion.revisadoPorNombre ?? "revisor no registrado"}{conciliacion.revisadoEn ? ` el ${new Date(conciliacion.revisadoEn).toLocaleString("es-NI")}` : ""}.{conciliacion.observaciones ? ` Observaciones: ${conciliacion.observaciones}` : ""}</div> : null}
+        {conciliacion.estado === "rechazada" && canApprove ? <div className="reviewActions reopenBlock"><label>Motivo de reapertura<textarea value={observaciones} onChange={event => setObservaciones(event.target.value)} rows={2} placeholder="Explique la corrección solicitada"/></label><button className="primary" type="button" onClick={reabrirConciliacion}>Reabrir conciliación</button></div> : null}
         {conciliacion.estado === "borrador" && conciliacion.lineasPendientes > 0 && canApprove ? <div className="readOnlyBanner">Para aprobar debe enlazar o descartar las {conciliacion.lineasPendientes} líneas pendientes.</div> : null}
+        <div className="segmentedTabs" role="tablist" aria-label="Filtrar líneas por estado">
+          {(["todas", "pendiente", "conciliada", "descartada"] as const).map(tab => <button key={tab} type="button" className={estadoLineas === tab ? "active" : ""} onClick={() => setEstadoLineas(tab)}>{tab === "todas" ? "Todas" : tab}<span>{tab === "todas" ? detalle?.lineas.length ?? 0 : conteoLineas[tab]}</span></button>)}
+        </div>
         <div className="tableToolbar">
           <label>Buscar<input value={filtroLineas} onChange={event => setFiltroLineas(event.target.value)} placeholder="Descripción, referencia o minuta"/></label>
           <label>Estado<select value={estadoLineas} onChange={event => setEstadoLineas(event.target.value as LineaBanco["estadoConciliacion"] | "todas")}><option value="todas">Todas</option><option value="pendiente">Pendientes</option><option value="conciliada">Conciliadas</option><option value="descartada">Descartadas</option></select></label>

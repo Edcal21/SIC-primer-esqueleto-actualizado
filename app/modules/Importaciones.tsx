@@ -28,6 +28,8 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
   const [catalogoResultado, setCatalogoResultado] = useState<CatalogoResultado | null>(null);
   const [auxiliarFile, setAuxiliarFile] = useState<File | null>(null);
   const [auxiliarResultado, setAuxiliarResultado] = useState<AuxiliarResultado | null>(null);
+  const [balanzaResultado, setBalanzaResultado] = useState<ImportacionBalanza | null>(null);
+  const [situacionResultado, setSituacionResultado] = useState<ImportacionSituacionFinanciera | null>(null);
   const [periodo, setPeriodo] = useState(currentMonth());
   const [situacionPeriodo, setSituacionPeriodo] = useState(currentMonth());
   const [error, setError] = useState("");
@@ -76,6 +78,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
     try {
       const importacion = await enviarArchivo("/api/importaciones/balanza", file, periodo);
       setImportaciones(current => [importacion, ...current]);
+      setBalanzaResultado(importacion);
       setFile(null);
       notify(`${estadoImportacion(importacion.estado)}: ${importacion.totalLineas} lineas`);
     } catch (cause) {
@@ -93,6 +96,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
     try {
       const importacion = await enviarArchivo("/api/importaciones/situacion-financiera", situacionFile, situacionPeriodo);
       setSituaciones(current => [importacion, ...current]);
+      setSituacionResultado(importacion);
       setSituacionFile(null);
       notify(`Estado de Situación Financiera procesado: ${importacion.totalLineas} saldos finales`);
     } catch (cause) {
@@ -228,6 +232,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
             <label className="wide">Campos detectados<input readOnly value="Descripcion, Saldo Final" /></label>
           </div>
           {situacionFile ? <div className="readOnlyBanner">Archivo seleccionado: {situacionFile.name} - {Math.round(situacionFile.size / 1024)} KB</div> : null}
+          {situacionResultado ? <div className="importResult ok"><b>Estado financiero procesado</b><span>{situacionResultado.periodo} · {situacionResultado.totalLineas} saldos finales · {situacionResultado.archivoNombre}</span></div> : null}
           {error ? <div className="authError adminError">{error}</div> : null}
           <div className="formActions"><button className="primary" type="submit" disabled={savingSituacion}>{savingSituacion ? "Importando..." : "Importar estado financiero"}</button></div>
         </form>
@@ -245,6 +250,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
             <label className="wide">Campos detectados<input readOnly value="Cuenta, Descripcion, Saldo Inicial, Debitos, Creditos, Saldo Final" /></label>
           </div>
           {file ? <div className="readOnlyBanner">Archivo seleccionado: {file.name} - {Math.round(file.size / 1024)} KB</div> : null}
+          {balanzaResultado ? <div className={balanzaResultado.estado === "procesado" ? "importResult ok" : "importResult warn"}><b>{estadoImportacion(balanzaResultado.estado)}</b><span>{balanzaResultado.periodo} · {balanzaResultado.totalLineas} líneas · debe {dinero.format(Number(balanzaResultado.totalDebe))} · haber {dinero.format(Number(balanzaResultado.totalHaber))}</span></div> : null}
           {error ? <div className="authError adminError">{error}</div> : null}
           <div className="formActions"><button className="primary" type="submit" disabled={saving}>{saving ? "Importando..." : "Importar balanza"}</button></div>
         </form>

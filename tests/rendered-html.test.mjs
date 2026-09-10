@@ -95,6 +95,24 @@ test("every navigable module has a real screen wired in the shell", async () => 
   assert.match(movimiento, /import \{[^}]*useRef[^}]*\} from "react"/, "Movimiento debe importar cada hook de React que utiliza");
 });
 
+test("role workflows and accounting UX are guided", async () => {
+  const [resumen, cierre, importaciones, conciliacion, css] = await Promise.all([
+    readFile(new URL("../app/modules/Resumen.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/CierreContable.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/Importaciones.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/modules/ConciliacionBancaria.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(resumen, /tareasPorRol/, "el resumen debe orientar tareas por rol");
+  assert.match(resumen, /Trabajo recomendado/, "el dashboard debe exponer acciones sugeridas");
+  assert.match(cierre, /checklistPeriodo/, "cierre debe mostrar checklist visual por período");
+  assert.match(importaciones, /importResult/, "importaciones debe mostrar resultado de carga claro");
+  assert.match(conciliacion, /segmentedTabs/, "conciliación debe ofrecer filtros por estado tipo pestañas");
+  assert.match(conciliacion, /reabrirConciliacion/, "conciliación debe permitir reabrir rechazos desde la UI");
+  assert.match(css, /periodChecklistGrid/, "los nuevos controles deben tener estilos dedicados");
+});
+
 test("bank statements and reconciliation persist to PostgreSQL", async () => {
   const [carga, conciliacion, conciliacionUi, auditoria, configuracion] = await Promise.all([
     readFile(new URL("../app/api/banco/reportes/route.ts", import.meta.url), "utf8"),

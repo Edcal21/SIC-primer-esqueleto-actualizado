@@ -15,6 +15,12 @@ const etiquetaEstado: Record<PeriodoContable["estado"], string> = {
 };
 
 const fechaLegible = (valor: string | null) => valor ? new Date(valor).toLocaleString("es-NI") : "—";
+const checklistPeriodo = (periodo: PeriodoContable, bloqueos: ImpedimentoCierre[]) => [
+  { texto: "Período administrado", estado: "done" },
+  { texto: periodo.estado === "cerrado" ? "Cierre ejecutado" : "En revisión o abierto", estado: periodo.estado === "cerrado" ? "done" : periodo.estado === "revision" ? "active" : "pending" },
+  { texto: bloqueos.length ? `${bloqueos.length} impedimento(s)` : "Sin impedimentos detectados", estado: bloqueos.length ? "blocked" : "done" },
+  { texto: periodo.reabiertoEn ? "Reapertura auditada" : "Sin reapertura", estado: periodo.reabiertoEn ? "active" : "pending" },
+];
 
 export default function CierreContable({ notify, requestConfirmation }: { notify: (message: string) => void; requestConfirmation: RequestConfirmation }) {
   const [periodos, setPeriodos] = useState<PeriodoContable[]>([]);
@@ -125,6 +131,16 @@ export default function CierreContable({ notify, requestConfirmation }: { notify
 
     <section className="panel tablePanel">
       <div className="panelHead"><div><h2>Períodos</h2><p>{loading ? "Cargando desde PostgreSQL" : `${periodos.length} períodos administrados`}</p></div><button onClick={cargar}>Actualizar</button></div>
+      <div className="periodChecklistGrid">
+        {periodos.slice(0, 4).map(item => {
+          const bloqueos = impedimentos[item.periodo] ?? [];
+          return <article key={`check-${item.periodo}`} className="periodChecklist">
+            <header><b>{item.periodo}</b><span className={estadoClase(item.estado)}>{etiquetaEstado[item.estado]}</span></header>
+            <ol>{checklistPeriodo(item, bloqueos).map(paso => <li key={paso.texto} className={paso.estado}><span aria-hidden="true"/>{paso.texto}</li>)}</ol>
+            {bloqueos.length ? <small>{bloqueos[0].detalle}</small> : <small>Listo para avanzar cuando el responsable lo confirme.</small>}
+          </article>;
+        })}
+      </div>
       <div className="tableWrap"><table>
         <thead><tr><th>PERÍODO</th><th>ESTADO</th><th>APERTURA</th><th>CIERRE</th><th>REAPERTURA</th><th>ACCIONES</th></tr></thead>
         <tbody>{periodos.map(item => {

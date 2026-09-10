@@ -8,7 +8,7 @@ import { jsonSeguro } from "./security";
 export type RolId = "administrador" | "contador_general" | "operador_bancario" | "auditor_general";
 export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:ver" | "conciliacion:gestionar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
 
-export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[] };
+export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[]; debeCambiarPassword?: boolean };
 type UsuarioInterno = UsuarioSesion & { salt: string; passwordHash: string };
 
 const COOKIE = "sic_session";
@@ -62,7 +62,8 @@ async function usuarioDesdeDbPorUsuario(usuario: string): Promise<UsuarioInterno
     usuario: found.usuario,
     nombre: found.nombre,
     rol: found.rolId as RolId,
-    permisos: permisos.map(item => item.permisoId as Permiso),
+    permisos: found.debeCambiarPassword ? [] : permisos.map(item => item.permisoId as Permiso),
+    debeCambiarPassword: found.debeCambiarPassword,
     salt: found.salt,
     passwordHash: found.passwordHash,
   };
@@ -78,7 +79,8 @@ async function usuarioDesdeDbPorId(id: string): Promise<UsuarioSesion | null> {
     usuario: found.usuario,
     nombre: found.nombre,
     rol: found.rolId as RolId,
-    permisos: permisos.map(item => item.permisoId as Permiso),
+    permisos: found.debeCambiarPassword ? [] : permisos.map(item => item.permisoId as Permiso),
+    debeCambiarPassword: found.debeCambiarPassword,
   };
 }
 
