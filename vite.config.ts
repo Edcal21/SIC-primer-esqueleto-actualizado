@@ -10,7 +10,6 @@ const serveOnLan = process.env.SIC_LAN === "true";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
   d1_databases: [],
   r2_buckets: [],
 };
