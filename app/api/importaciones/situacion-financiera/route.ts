@@ -6,6 +6,7 @@ import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { mensajePeriodoCerrado, primerPeriodoCerrado } from "../../../../lib/periodos";
 import { verificarRateLimit } from "../../../../lib/security";
 import { leerSituacionFinanciera } from "../../../../lib/situacion-financiera";
+import { prepararEvidenciaArchivo, registrarArchivoImportado } from "../../../../lib/importaciones";
 
 const periodoRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -37,15 +38,23 @@ export async function POST(request: Request) {
   const cerrado = await primerPeriodoCerrado(db, [periodo]);
   if (cerrado) return jsonError(mensajePeriodoCerrado(cerrado), 409);
 
+  const evidencia = await prepararEvidenciaArchivo(archivo);
   let procesado;
   try {
-    procesado = leerSituacionFinanciera(await archivo.arrayBuffer());
+    procesado = leerSituacionFinanciera(evidencia.arrayBuffer);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "No se pudo leer el Estado de Situación Financiera", 400);
+    const mensaje = error instanceof Error ? error.message : "No se pudo leer el Estado de Situación Financiera";
+    await db.transaction(tx => registrarArchivoImportado(tx, { evidencia, tipo: "situacion_financiera", user, periodo, cantidadRegistros: 0, estado: "error", mensajeError: mensaje }));
+    return jsonError(mensaje, 400);
   }
 
   try {
     const result = await db.transaction(async tx => {
+      const totalSaldoFinal = procesado.filas.reduce((total: number, fila: { saldoFinal: string }) => total + Number(fila.saldoFinal), 0);
+      const archivoImportado = await registrarArchivoImportado(tx, {
+        evidencia, tipo: "situacion_financiera", user, periodo, cantidadRegistros: procesado.filas.length,
+        totalesControl: { sumaSaldosFinales: totalSaldoFinal.toFixed(2) },
+      });
       const [importacion] = await tx.insert(importacionesSituacionFinanciera).values({
         archivoNombre: archivo.name,
         archivoTamano: archivo.size,
@@ -53,6 +62,7 @@ export async function POST(request: Request) {
         estado: "procesado",
         totalLineas: procesado.filas.length,
         importadoPor: user.id,
+        archivoImportadoId: archivoImportado.id,
       }).returning();
       const lineas = await tx.insert(lineasSituacionFinanciera).values(
         procesado.filas.map(fila => ({ ...fila, importacionId: importacion.id })),
@@ -63,9 +73,9 @@ export async function POST(request: Request) {
         accion: "Importó estado de situación financiera",
         entidad: "importaciones_situacion_financiera",
         entidadId: importacion.id,
-        detalle: `${archivo.name} · ${periodo} · ${lineas.length} líneas con Saldo Final`,
+        detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${periodo} · ${lineas.length} líneas con Saldo Final`,
       });
-      return { importacion, lineas };
+      return { importacion, lineas, archivoImportado: { id: archivoImportado.id, version: archivoImportado.version, hashSha256: archivoImportado.archivoHashSha256 } };
     });
     return Response.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

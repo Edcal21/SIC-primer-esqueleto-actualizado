@@ -1,11 +1,12 @@
 import { conBloqueoConciliacion, esConflictoContable } from "../../../../lib/conciliacion-lock";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
+import { archivosImportados, conciliacionesArchivosImportados, conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
 import { registrarAdvertenciaSegregacionConciliacion, registrarAuditoria } from "../../../../lib/auditoria";
 import { estaPendienteDeTasa, mismoMonto, movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
 import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../../lib/periodos";
+import { sincronizarArchivosConciliacion } from "../../../../lib/importaciones";
 
 type AccionConciliacion = "conciliar" | "descartar" | "reabrir" | "aprobar" | "rechazar" | "reabrir_conciliacion";
 type ConciliacionUpdatePayload = {
@@ -26,10 +27,28 @@ async function detalle(db: ReturnType<typeof getDb>, id: string) {
   const conciliacion = await cargarConciliacion(db, id);
   if (!conciliacion) return null;
 
-  const [[reporte], [cuenta], lineas] = await Promise.all([
+  const [[reporte], [cuenta], lineas, archivos] = await Promise.all([
     db.select().from(reportesBancarios).where(eq(reportesBancarios.id, conciliacion.reporteId)).limit(1),
     db.select().from(cuentasBancarias).where(eq(cuentasBancarias.numeroCuenta, conciliacion.cuentaBancariaNumero)).limit(1),
     db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId)).orderBy(asc(lineasReporteBancario.numeroLinea)),
+    db.select({
+      id: archivosImportados.id,
+      rol: conciliacionesArchivosImportados.rol,
+      tipo: archivosImportados.tipo,
+      archivoNombre: archivosImportados.archivoNombre,
+      archivoTamano: archivosImportados.archivoTamano,
+      archivoHashSha256: archivosImportados.archivoHashSha256,
+      cuentaBancariaNumero: archivosImportados.cuentaBancariaNumero,
+      periodo: archivosImportados.periodo,
+      version: archivosImportados.version,
+      cantidadRegistros: archivosImportados.cantidadRegistros,
+      totalesControl: archivosImportados.totalesControl,
+      importadoPorNombre: archivosImportados.importadoPorNombre,
+      creadoEn: archivosImportados.creadoEn,
+    }).from(conciliacionesArchivosImportados)
+      .innerJoin(archivosImportados, eq(archivosImportados.id, conciliacionesArchivosImportados.archivoImportadoId))
+      .where(eq(conciliacionesArchivosImportados.conciliacionId, id))
+      .orderBy(asc(conciliacionesArchivosImportados.rol), asc(archivosImportados.version)),
   ]);
 
   const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
@@ -48,6 +67,7 @@ async function detalle(db: ReturnType<typeof getDb>, id: string) {
       movimiento: linea.movimientoId ? movimientoPorId.get(linea.movimientoId) ?? null : null,
     })),
     movimientos,
+    archivos,
   };
 }
 
@@ -126,6 +146,7 @@ async function actualizarLinea(
   }
 
   const actualizada = await recalcularConciliacion(db, conciliacion.id);
+  await sincronizarArchivosConciliacion(db, conciliacion.id);
   const etiquetas = { conciliar: "Enlazó línea bancaria con movimiento", descartar: "Descartó línea bancaria", reabrir: "Reabrió línea bancaria" };
   await registrarAuditoria(db, {
     user,
@@ -164,6 +185,7 @@ async function revisar(
   if (accion === "aprobar" && actual && actual.lineasPendientes > 0) {
     return jsonError(`No se puede aprobar: quedan ${actual.lineasPendientes} líneas bancarias sin conciliar ni descartar`, 400);
   }
+  await sincronizarArchivosConciliacion(db, conciliacion.id);
 
   const [lineaGestionadaPorRevisor] = accion === "aprobar"
     ? await db.select({ id: lineasReporteBancario.id }).from(lineasReporteBancario)
@@ -231,6 +253,7 @@ async function reabrirConciliacion(
     revisadoPorNombre: null,
     revisadoEn: null,
   }).where(eq(conciliacionesBancarias.id, conciliacion.id)).returning();
+  await sincronizarArchivosConciliacion(db, conciliacion.id);
 
   await registrarAuditoria(db, {
     user,

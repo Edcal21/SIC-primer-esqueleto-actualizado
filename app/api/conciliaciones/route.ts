@@ -6,6 +6,7 @@ import { registrarAuditoria } from "../../../lib/auditoria";
 import { autoConciliar, periodoDesdeFecha, recalcularConciliacion } from "../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../lib/auth";
 import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../lib/periodos";
+import { sincronizarArchivosConciliacion } from "../../../lib/importaciones";
 
 type ConciliacionPayload = { reporteId?: string };
 
@@ -100,6 +101,7 @@ export async function POST(request: Request) {
 
       const automaticas = await autoConciliar(db, reporte.id, reporte.cuentaBancariaNumero, user.id);
       const actualizada = await recalcularConciliacion(db, conciliacion.id);
+      await sincronizarArchivosConciliacion(db, conciliacion.id);
       await registrarAuditoria(db, {
         user,
         modulo: "Conciliación",

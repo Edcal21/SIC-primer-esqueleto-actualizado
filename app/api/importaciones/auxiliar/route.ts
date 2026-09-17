@@ -8,6 +8,7 @@ import { construirDetallesMovimiento } from "../../../../lib/movimientos";
 import { verificarPeriodosAbiertos } from "../../../../lib/periodos";
 import { verificarRateLimit } from "../../../../lib/security";
 import { obtenerTasaVigente } from "../../../../lib/tasas";
+import { prepararEvidenciaArchivo, registrarArchivoImportado } from "../../../../lib/importaciones";
 
 export async function POST(request: Request) {
   const limited = verificarRateLimit(request, { keyPrefix: "importaciones:auxiliar", limit: 10, windowMs: 60_000 });
@@ -24,17 +25,28 @@ export async function POST(request: Request) {
   if (archivo.size > 10 * 1024 * 1024) return jsonError("El archivo supera el límite de 10 MB", 413);
   if (!/\.(csv|xlsx|xls)$/i.test(archivo.name)) return jsonError("Formato no permitido; use CSV o Excel", 415);
 
+  const db = getDb();
+  const evidencia = await prepararEvidenciaArchivo(archivo);
   let auxiliar;
   try {
-    auxiliar = leerAuxiliarContable(await archivo.arrayBuffer());
+    auxiliar = leerAuxiliarContable(evidencia.arrayBuffer);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "No se pudo leer el auxiliar contable", 400);
+    const mensaje = error instanceof Error ? error.message : "No se pudo leer el auxiliar contable";
+    await db.transaction(tx => registrarArchivoImportado(tx, { evidencia, tipo: "auxiliar_contable", user, cantidadRegistros: 0, estado: "error", mensajeError: mensaje }));
+    return jsonError(mensaje, 400);
   }
 
-  const db = getDb();
   try {
     const result = await db.transaction(async tx => {
       const movimientosCreados = [];
+      const fechas = auxiliar.movimientos.map((movimiento: { fecha: string }) => movimiento.fecha).sort();
+      const primerPeriodo = fechas[0]?.slice(0, 7) ?? null;
+      const ultimoPeriodo = fechas.at(-1)?.slice(0, 7) ?? null;
+      const periodo = primerPeriodo === ultimoPeriodo ? primerPeriodo : `${fechas[0]}/${fechas.at(-1)}`;
+      const archivoImportado = await registrarArchivoImportado(tx, {
+        evidencia, tipo: "auxiliar_contable", user, periodo, cantidadRegistros: auxiliar.movimientos.length,
+        totalesControl: { totalLineas: auxiliar.totalLineas, totalDebitos: auxiliar.totalDebitos.toFixed(2), totalCreditos: auxiliar.totalCreditos.toFixed(2) },
+      });
 
       for (const movimiento of auxiliar.movimientos) {
         const bloqueo = await verificarPeriodosAbiertos(tx, [movimiento.fecha]);
@@ -65,6 +77,7 @@ export async function POST(request: Request) {
           referencia: movimiento.referencia,
           concepto: movimiento.concepto,
           creadoPor: user.id,
+          archivoImportadoId: archivoImportado.id,
         }).returning();
 
         const detalles = await tx.insert(detallesMovimientos).values(
@@ -90,8 +103,8 @@ export async function POST(request: Request) {
         modulo: "Importaciones",
         accion: "Importó auxiliar contable",
         entidad: "movimientos_cuentas",
-        entidadId: archivo.name,
-        detalle: `${archivo.name} · ${auxiliar.movimientos.length} movimientos · ${auxiliar.totalLineas} líneas · débitos ${auxiliar.totalDebitos.toFixed(2)} · créditos ${auxiliar.totalCreditos.toFixed(2)}`,
+        entidadId: archivoImportado.id,
+        detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${auxiliar.movimientos.length} movimientos · ${auxiliar.totalLineas} líneas · débitos ${auxiliar.totalDebitos.toFixed(2)} · créditos ${auxiliar.totalCreditos.toFixed(2)}`,
       });
 
       return {
@@ -101,6 +114,7 @@ export async function POST(request: Request) {
         totalLineas: auxiliar.totalLineas,
         totalDebitos: auxiliar.totalDebitos.toFixed(2),
         totalCreditos: auxiliar.totalCreditos.toFixed(2),
+        archivoImportado: { id: archivoImportado.id, version: archivoImportado.version, hashSha256: archivoImportado.archivoHashSha256 },
       };
     });
 

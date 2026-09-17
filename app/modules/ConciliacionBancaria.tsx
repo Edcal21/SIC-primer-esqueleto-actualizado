@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { formatearMoneda, type Conciliacion, type LineaBanco, type LineaConciliacion, type MovimientoConciliable, type ReporteDisponible, type RequestConfirmation } from "../shared";
+import { formatearMoneda, type ArchivoConciliacion, type Conciliacion, type LineaBanco, type LineaConciliacion, type MovimientoConciliable, type ReporteDisponible, type RequestConfirmation } from "../shared";
 
 const estadoLineaClass = (estado: LineaBanco["estadoConciliacion"]) => estado === "conciliada" ? "status done" : estado === "descartada" ? "status danger" : "status pending";
 const estadoConciliacionClass = (estado: Conciliacion["estado"]) => estado === "aprobada" ? "status done" : estado === "rechazada" ? "status danger" : "status pending";
@@ -11,7 +11,7 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
   const [conciliaciones, setConciliaciones] = useState<Conciliacion[]>([]);
   const [disponibles, setDisponibles] = useState<ReporteDisponible[]>([]);
   const [seleccionada, setSeleccionada] = useState("");
-  const [detalle, setDetalle] = useState<{ conciliacion: Conciliacion; lineas: LineaConciliacion[]; movimientos: MovimientoConciliable[] } | null>(null);
+  const [detalle, setDetalle] = useState<{ conciliacion: Conciliacion; lineas: LineaConciliacion[]; movimientos: MovimientoConciliable[]; archivos: ArchivoConciliacion[] } | null>(null);
   const [reporteNuevo, setReporteNuevo] = useState("");
   const [enlaces, setEnlaces] = useState<Record<string, string>>({});
   const [observaciones, setObservaciones] = useState("");
@@ -39,9 +39,9 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
     setSeleccionada(id); setDetalle(null); setEnlaces({}); setObservaciones("");
     try {
       const response = await fetch(`/api/conciliaciones/${id}`);
-      const data = await response.json().catch(() => ({})) as { conciliacion?: Conciliacion; lineas?: LineaConciliacion[]; movimientos?: MovimientoConciliable[]; error?: string };
+      const data = await response.json().catch(() => ({})) as { conciliacion?: Conciliacion; lineas?: LineaConciliacion[]; movimientos?: MovimientoConciliable[]; archivos?: ArchivoConciliacion[]; error?: string };
       if (!response.ok || !data.conciliacion) return setError(data.error ?? "No se pudo cargar la conciliación");
-      setDetalle({ conciliacion: data.conciliacion, lineas: data.lineas ?? [], movimientos: data.movimientos ?? [] });
+      setDetalle({ conciliacion: data.conciliacion, lineas: data.lineas ?? [], movimientos: data.movimientos ?? [], archivos: data.archivos ?? [] });
       setError("");
     } catch { setError("No se pudo conectar con el servicio de conciliaciones"); }
   }
@@ -194,6 +194,18 @@ export default function ConciliacionBancaria({ canReconcile, canApprove, notify,
           <article className="metric"><p>Minutas sin respaldo bancario</p><strong>{conciliacion.movimientosSinConciliar}</strong><small>Registradas en libros y ausentes del estado de cuenta</small></article>
         </section>;
       })()}
+      <section className="panel tablePanel">
+        <div className="panelHead"><div><h2>Archivos fuente de la conciliación</h2><p>Versiones exactas usadas para reproducir este resultado</p></div></div>
+        {detalle?.archivos.length ? <div className="tableWrap"><table><thead><tr><th>ROL</th><th>ARCHIVO / VERSIÓN</th><th>PERÍODO</th><th>REGISTROS</th><th>HASH SHA-256</th><th>IMPORTADO POR</th><th>ORIGINAL</th></tr></thead><tbody>{detalle.archivos.map(archivo => <tr key={archivo.id}>
+          <td>{archivo.rol === "estado_bancario" ? "Estado bancario" : "Movimientos"}</td>
+          <td><b>{archivo.archivoNombre}</b><small>Versión {archivo.version}</small></td>
+          <td>{archivo.periodo ?? "Sin período"}</td>
+          <td>{archivo.cantidadRegistros}</td>
+          <td><code title={archivo.archivoHashSha256}>{archivo.archivoHashSha256.slice(0, 12)}…</code></td>
+          <td>{archivo.importadoPorNombre}<small>{new Date(archivo.creadoEn).toLocaleString("es-NI")}</small></td>
+          <td><a className="secondary buttonLink" href={`/api/importaciones/archivos/${archivo.id}`}>Descargar</a></td>
+        </tr>)}</tbody></table></div> : <div className="readOnlyBanner">Esta conciliación usa registros históricos anteriores a la trazabilidad de archivos; no existe un original recuperable para asociar retroactivamente.</div>}
+      </section>
       <section className="panel tablePanel">
         <div className="panelHead">
           <div><h2>Detalle de la conciliación</h2><p>{conciliacion.reporteNombre} · cuenta {conciliacion.cuentaBancariaNombre ?? conciliacion.cuentaBancariaNumero} ({conciliacion.cuentaBancariaMoneda ?? "NIO"}) · período {conciliacion.periodo}</p></div>

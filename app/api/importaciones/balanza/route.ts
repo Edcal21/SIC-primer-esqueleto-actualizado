@@ -6,6 +6,7 @@ import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../../lib/periodos";
 import { verificarRateLimit } from "../../../../lib/security";
 import { leerBalanza, type BalanzaProcesada } from "../../../../lib/balanza";
+import { prepararEvidenciaArchivo, registrarArchivoImportado } from "../../../../lib/importaciones";
 
 const periodoRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -51,11 +52,14 @@ export async function POST(request: Request) {
   const periodoCerrado = await primerPeriodoCerrado(db, [periodo]);
   if (periodoCerrado) return jsonError(mensajePeriodoCerrado(periodoCerrado), 409);
 
+  const evidencia = await prepararEvidenciaArchivo(archivo);
   let balanza: BalanzaProcesada;
   try {
-    balanza = leerBalanza(await archivo.arrayBuffer());
+    balanza = leerBalanza(evidencia.arrayBuffer);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "No se pudo leer la balanza", 400);
+    const mensaje = error instanceof Error ? error.message : "No se pudo leer la balanza";
+    await db.transaction(tx => registrarArchivoImportado(tx, { evidencia, tipo: "balanza", user, periodo, cantidadRegistros: 0, estado: "error", mensajeError: mensaje }));
+    return jsonError(mensaje, 400);
   }
 
   const { filas, totalDebe, totalHaber } = balanza;
@@ -82,6 +86,10 @@ export async function POST(request: Request) {
 
   try {
     const result = await db.transaction(async tx => {
+      const archivoImportado = await registrarArchivoImportado(tx, {
+        evidencia, tipo: "balanza", user, periodo, cantidadRegistros: filas.length,
+        totalesControl: { totalDebe: totalDebe.toFixed(2), totalHaber: totalHaber.toFixed(2), diferencia: diferencia.toFixed(2) },
+      });
       const [importacion] = await tx.insert(importacionesBalanza).values({
         archivoNombre: archivo.name,
         archivoTamano: archivo.size,
@@ -91,6 +99,7 @@ export async function POST(request: Request) {
         totalDebe: totalDebe.toFixed(2),
         totalHaber: totalHaber.toFixed(2),
         importadoPor: user.id,
+        archivoImportadoId: archivoImportado.id,
       }).returning();
 
       const lineas = await tx.insert(lineasBalanza).values(
@@ -102,10 +111,10 @@ export async function POST(request: Request) {
         accion: "Importó balanza de comprobación",
         entidad: "importaciones_balanza",
         entidadId: importacion.id,
-        detalle: `${archivo.name} · ${periodo} · ${filas.length} líneas · diferencia ${diferencia.toFixed(2)}`,
+        detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${periodo} · ${filas.length} líneas · diferencia ${diferencia.toFixed(2)}`,
       });
 
-      return { importacion, lineas };
+      return { importacion, lineas, archivoImportado: { id: archivoImportado.id, version: archivoImportado.version, hashSha256: archivoImportado.archivoHashSha256 } };
     });
 
     return Response.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });

@@ -1,6 +1,6 @@
 "use client";
 import { type FormEvent, useEffect, useState } from "react";
-import { currentMonth, dinero, estadoImportacion, statusClass, type ImportacionBalanza, type ImportacionSituacionFinanciera } from "../shared";
+import { currentMonth, dinero, estadoImportacion, statusClass, type ArchivoImportado, type ImportacionBalanza, type ImportacionSituacionFinanciera } from "../shared";
 
 type CatalogoResultado = {
   archivoNombre: string;
@@ -22,6 +22,7 @@ type AuxiliarResultado = {
 export default function Importaciones({ notify }: { notify: (message: string) => void }) {
   const [importaciones, setImportaciones] = useState<ImportacionBalanza[]>([]);
   const [situaciones, setSituaciones] = useState<ImportacionSituacionFinanciera[]>([]);
+  const [archivos, setArchivos] = useState<ArchivoImportado[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [situacionFile, setSituacionFile] = useState<File | null>(null);
   const [catalogoFile, setCatalogoFile] = useState<File | null>(null);
@@ -42,15 +43,18 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
 
   async function cargarHistorial() {
     try {
-      const [balanzaResponse, situacionResponse] = await Promise.all([
+      const [balanzaResponse, situacionResponse, archivosResponse] = await Promise.all([
         fetch("/api/importaciones/balanza"),
         fetch("/api/importaciones/situacion-financiera"),
+        fetch("/api/importaciones/archivos"),
       ]);
-      const [balanzaData, situacionData] = await Promise.all([balanzaResponse.json(), situacionResponse.json()]);
+      const [balanzaData, situacionData, archivosData] = await Promise.all([balanzaResponse.json(), situacionResponse.json(), archivosResponse.json()]);
       if (!balanzaResponse.ok) throw new Error(balanzaData.error ?? "No se pudo cargar el historial de balanzas");
       if (!situacionResponse.ok) throw new Error(situacionData.error ?? "No se pudo cargar el historial de estados financieros");
+      if (!archivosResponse.ok) throw new Error(archivosData.error ?? "No se pudo cargar la trazabilidad de archivos");
       setImportaciones(balanzaData.importaciones ?? []);
       setSituaciones(situacionData.importaciones ?? []);
+      setArchivos(archivosData.archivos ?? []);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo cargar el historial");
     }
@@ -81,6 +85,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
       setBalanzaResultado(importacion);
       setFile(null);
       notify(`${estadoImportacion(importacion.estado)}: ${importacion.totalLineas} lineas`);
+      await cargarHistorial();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo importar la balanza");
     } finally {
@@ -99,6 +104,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
       setSituacionResultado(importacion);
       setSituacionFile(null);
       notify(`Estado de Situación Financiera procesado: ${importacion.totalLineas} saldos finales`);
+      await cargarHistorial();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo importar el Estado de Situación Financiera");
     } finally {
@@ -120,6 +126,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
       setCatalogoResultado(result.importacion);
       setCatalogoFile(null);
       notify(`Catalogo importado: ${result.importacion.totalLineas} cuentas`);
+      await cargarHistorial();
     } catch (cause) {
       setCatalogoError(cause instanceof Error ? cause.message : "No se pudo importar el catalogo contable");
     } finally {
@@ -141,6 +148,7 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
       setAuxiliarResultado(result.importacion);
       setAuxiliarFile(null);
       notify(`Auxiliar importado: ${result.importacion.totalMovimientos} movimientos`);
+      await cargarHistorial();
     } catch (cause) {
       setAuxiliarError(cause instanceof Error ? cause.message : "No se pudo importar el auxiliar contable");
     } finally {
@@ -282,6 +290,34 @@ export default function Importaciones({ notify }: { notify: (message: string) =>
           </table>
         </div>
         {!situaciones.length ? <div className="emptyReport">Todavia no hay Estados de Situacion Financiera importados.</div> : null}
+      </section>
+
+      <section className="panel tablePanel">
+        <div className="panelHead">
+          <div>
+            <h2>Trazabilidad de archivos</h2>
+            <p>{archivos.length} versiones registradas con original y huella SHA-256</p>
+          </div>
+        </div>
+        <div className="tableWrap">
+          <table>
+            <thead><tr><th>ARCHIVO / VERSIÓN</th><th>TIPO</th><th>CUENTA / PERÍODO</th><th>REGISTROS</th><th>TOTALES DE CONTROL</th><th>USUARIO / FECHA</th><th>HASH SHA-256</th><th>ESTADO</th><th>ORIGINAL</th></tr></thead>
+            <tbody>{archivos.map(item => (
+              <tr key={item.id}>
+                <td><b>{item.archivoNombre}</b><small>Versión {item.version} · {Math.round(item.archivoTamano / 1024)} KB</small></td>
+                <td>{item.tipo.replaceAll("_", " ")}</td>
+                <td>{item.cuentaBancariaNumero ?? "Sin cuenta"}<small>{item.periodo ?? "Sin período"}</small></td>
+                <td>{item.cantidadRegistros}</td>
+                <td><small>{Object.entries(item.totalesControl).map(([clave, valor]) => `${clave}: ${valor}`).join(" · ") || "Sin totales"}</small></td>
+                <td>{item.importadoPorNombre}<small>{new Date(item.creadoEn).toLocaleString("es-NI")}</small></td>
+                <td><code title={item.archivoHashSha256}>{item.archivoHashSha256.slice(0, 12)}…</code></td>
+                <td><span className={statusClass(item.estado)}>{item.estado === "procesado" ? "Procesado" : "Error"}</span>{item.mensajeError ? <small>{item.mensajeError}</small> : null}</td>
+                <td><a className="secondary buttonLink" href={`/api/importaciones/archivos/${item.id}`}>Descargar</a></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {!archivos.length ? <div className="emptyReport">Los archivos importados antes de esta mejora se conservan, pero no tienen evidencia original retroactiva.</div> : null}
       </section>
 
       <section className="panel tablePanel">

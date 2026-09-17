@@ -1,5 +1,7 @@
-import { boolean, check, date, foreignKey, index, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, customType, date, foreignKey, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => "bytea" });
 
 export const roles = pgTable("roles", {
   id: varchar("id", { length: 40 }).primaryKey().notNull(),
@@ -83,6 +85,42 @@ export const cuentasBancarias = pgTable("cuentas_bancarias", {
   check("ck_cuentas_bancarias_estado", sql`${table.estado} in ('activa', 'inactiva')`),
 ]);
 
+/** Evidencia inmutable de cada archivo recibido por SIC. Los módulos funcionales conservan sus
+ * tablas especializadas, pero apuntan a esta cabecera común para recuperar exactamente los bytes,
+ * el hash y la versión que originaron los registros. */
+export const archivosImportados = pgTable("archivos_importados", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tipo: varchar("tipo", { length: 28, enum: ["estado_bancario", "balanza", "situacion_financiera", "catalogo_contable", "auxiliar_contable"] }).notNull(),
+  archivoNombre: text("archivo_nombre").notNull(),
+  archivoMime: text("archivo_mime").notNull(),
+  archivoTamano: integer("archivo_tamano").notNull(),
+  archivoHashSha256: varchar("archivo_hash_sha256", { length: 64 }).notNull(),
+  archivoOriginal: bytea("archivo_original").notNull(),
+  cuentaBancariaNumero: varchar("cuenta_bancaria_numero", { length: 32 }).references(() => cuentasBancarias.numeroCuenta),
+  periodo: varchar("periodo", { length: 32 }),
+  claveVersion: text("clave_version").notNull(),
+  version: integer("version").notNull(),
+  cantidadRegistros: integer("cantidad_registros").notNull().default(0),
+  totalesControl: jsonb("totales_control").$type<Record<string, string | number>>().notNull().default({}),
+  estado: varchar("estado", { length: 10, enum: ["procesado", "error"] }).notNull().default("procesado"),
+  mensajeError: text("mensaje_error"),
+  importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  importadoPorNombre: text("importado_por_nombre").notNull(),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("ux_archivos_importados_version").on(table.claveVersion, table.version),
+  index("idx_archivos_importados_hash").on(table.archivoHashSha256),
+  index("idx_archivos_importados_tipo_periodo").on(table.tipo, table.periodo),
+  index("idx_archivos_importados_cuenta").on(table.cuentaBancariaNumero),
+  index("idx_archivos_importados_usuario_fecha").on(table.importadoPor, table.creadoEn),
+  check("ck_archivos_importados_tipo", sql`${table.tipo} in ('estado_bancario', 'balanza', 'situacion_financiera', 'catalogo_contable', 'auxiliar_contable')`),
+  check("ck_archivos_importados_hash", sql`${table.archivoHashSha256} ~ '^[0-9a-f]{64}$'`),
+  check("ck_archivos_importados_tamano", sql`${table.archivoTamano} >= 0 and octet_length(${table.archivoOriginal}) = ${table.archivoTamano}`),
+  check("ck_archivos_importados_version", sql`${table.version} > 0`),
+  check("ck_archivos_importados_registros", sql`${table.cantidadRegistros} >= 0`),
+  check("ck_archivos_importados_estado", sql`${table.estado} in ('procesado', 'error')`),
+]);
+
 export const movimientosCuentas = pgTable("movimientos_cuentas", {
   id: uuid("id").primaryKey().defaultRandom(),
   fecha: date("fecha").notNull(),
@@ -92,6 +130,7 @@ export const movimientosCuentas = pgTable("movimientos_cuentas", {
   concepto: text("concepto").notNull(),
   estado: varchar("estado", { length: 12, enum: ["registrado", "anulado"] }).notNull().default("registrado"),
   creadoPor: varchar("creado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  archivoImportadoId: uuid("archivo_importado_id").references(() => archivosImportados.id, { onDelete: "restrict" }),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("idx_movimientos_cuentas_fecha").on(table.fecha),
@@ -99,6 +138,7 @@ export const movimientosCuentas = pgTable("movimientos_cuentas", {
   index("idx_movimientos_cuentas_cuenta_bancaria").on(table.cuentaBancariaNumero),
   index("idx_movimientos_cuentas_referencia").on(table.referencia),
   index("idx_movimientos_cuentas_estado").on(table.estado),
+  index("idx_movimientos_cuentas_archivo").on(table.archivoImportadoId),
   uniqueIndex("ux_movimientos_unico").on(table.fecha, table.iglesiaCodigo, table.cuentaBancariaNumero, table.referencia).where(sql`${table.estado} = 'registrado'`),
   check("ck_movimientos_cuentas_estado", sql`${table.estado} in ('registrado', 'anulado')`),
 ]);
@@ -172,10 +212,12 @@ export const importacionesBalanza = pgTable("importaciones_balanza", {
   totalDebe: numeric("total_debe", { precision: 18, scale: 2 }).notNull().default("0"),
   totalHaber: numeric("total_haber", { precision: 18, scale: 2 }).notNull().default("0"),
   importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  archivoImportadoId: uuid("archivo_importado_id").references(() => archivosImportados.id, { onDelete: "restrict" }),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("idx_importaciones_balanza_periodo").on(table.periodo),
   index("idx_importaciones_balanza_usuario").on(table.importadoPor),
+  uniqueIndex("ux_importaciones_balanza_archivo").on(table.archivoImportadoId),
   check("ck_importaciones_balanza_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
   check("ck_importaciones_balanza_estado", sql`${table.estado} in ('procesado', 'con_diferencias', 'error')`),
   check("ck_importaciones_balanza_totales", sql`${table.totalLineas} >= 0 and ${table.totalDebe} >= 0 and ${table.totalHaber} >= 0`),
@@ -208,10 +250,12 @@ export const importacionesSituacionFinanciera = pgTable("importaciones_situacion
   estado: varchar("estado", { length: 10, enum: ["procesado", "error"] }).notNull().default("procesado"),
   totalLineas: integer("total_lineas").notNull().default(0),
   importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  archivoImportadoId: uuid("archivo_importado_id").references(() => archivosImportados.id, { onDelete: "restrict" }),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("idx_importaciones_situacion_periodo").on(table.periodo),
   index("idx_importaciones_situacion_usuario").on(table.importadoPor),
+  uniqueIndex("ux_importaciones_situacion_archivo").on(table.archivoImportadoId),
   check("ck_importaciones_situacion_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
   check("ck_importaciones_situacion_estado", sql`${table.estado} in ('procesado', 'error')`),
   check("ck_importaciones_situacion_lineas", sql`${table.totalLineas} >= 0`),
@@ -265,10 +309,12 @@ export const reportesBancarios = pgTable("reportes_bancarios", {
   totalDebitos: numeric("total_debitos", { precision: 18, scale: 2 }).notNull().default("0"),
   totalCreditos: numeric("total_creditos", { precision: 18, scale: 2 }).notNull().default("0"),
   mensajeError: text("mensaje_error"),
+  archivoImportadoId: uuid("archivo_importado_id").references(() => archivosImportados.id, { onDelete: "restrict" }),
 }, (table) => [
   index("idx_reportes_bancarios_fecha").on(table.fecha),
   index("idx_reportes_bancarios_usuario").on(table.cargadoPor),
   index("idx_reportes_bancarios_cuenta").on(table.cuentaBancariaNumero),
+  uniqueIndex("ux_reportes_bancarios_archivo").on(table.archivoImportadoId),
   check("ck_reportes_bancarios_estado", sql`${table.estado} in ('recibido', 'procesado', 'error')`),
   check("ck_reportes_bancarios_totales", sql`${table.totalLineas} >= 0 and ${table.totalDebitos} >= 0 and ${table.totalCreditos} >= 0`),
 ]);
@@ -386,4 +432,18 @@ export const conciliacionesBancarias = pgTable("conciliaciones_bancarias", {
   index("idx_conciliaciones_bancarias_periodo").on(table.periodo),
   check("ck_conciliaciones_bancarias_estado", sql`${table.estado} in ('borrador', 'aprobada', 'rechazada')`),
   check("ck_conciliaciones_bancarias_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+]);
+
+/** Archivos exactos que sustentan una conciliación: uno bancario y cero o más auxiliares que
+ * originaron los movimientos enlazados. Se recalcula mientras está en borrador y queda congelado
+ * al aprobarla. */
+export const conciliacionesArchivosImportados = pgTable("conciliaciones_archivos_importados", {
+  conciliacionId: uuid("conciliacion_id").notNull().references(() => conciliacionesBancarias.id, { onDelete: "cascade" }),
+  archivoImportadoId: uuid("archivo_importado_id").notNull().references(() => archivosImportados.id, { onDelete: "restrict" }),
+  rol: varchar("rol", { length: 18, enum: ["estado_bancario", "movimientos"] }).notNull(),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.conciliacionId, table.archivoImportadoId], name: "pk_conciliaciones_archivos" }),
+  index("idx_conciliaciones_archivos_archivo").on(table.archivoImportadoId),
+  check("ck_conciliaciones_archivos_rol", sql`${table.rol} in ('estado_bancario', 'movimientos')`),
 ]);

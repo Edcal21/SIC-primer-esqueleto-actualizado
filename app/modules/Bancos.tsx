@@ -96,7 +96,7 @@ export default function Bancos({ canUpload, canManageAccounts, notify, requestCo
     <section className="panel tablePanel">
       <div className="panelHead"><div><h2>Historial bancario</h2><p>{loading ? "Cargando desde PostgreSQL" : `${reportes.length} archivos disponibles`}</p></div><button onClick={cargarReportes}>Actualizar</button></div>
       <div className="tableWrap"><table><thead><tr><th>ARCHIVO</th><th>CUENTA</th><th>PERÍODO</th><th>LÍNEAS</th><th>DÉBITOS</th><th>CRÉDITOS</th><th>ESTADO</th><th>CONCILIACIÓN</th><th/></tr></thead><tbody>{reportes.map(item => <tr key={item.id}>
-        <td><b>{item.nombre}</b><small>{item.cargadoPor} · {new Date(item.fecha).toLocaleDateString("es-NI")}</small></td>
+        <td><b>{item.nombre}</b><small>{item.cargadoPor} · {new Date(item.fecha).toLocaleDateString("es-NI")}{item.version ? ` · versión ${item.version}` : " · archivo histórico"}</small>{item.hashSha256 ? <small title={item.hashSha256}>SHA-256 {item.hashSha256.slice(0, 12)}…</small> : null}</td>
         <td>{item.cuentaBancariaNumero ?? "No asignada"}</td>
         <td>{item.periodoInicio && item.periodoFin ? `${item.periodoInicio} a ${item.periodoFin}` : "Sin fechas en el archivo"}</td>
         <td>{item.totalLineas ?? 0}</td>
@@ -104,7 +104,7 @@ export default function Bancos({ canUpload, canManageAccounts, notify, requestCo
         <td className="amount">{dinero.format(Number(item.totalCreditos ?? 0))}</td>
         <td><span className={statusClass(item.estado)}>{item.estado}</span>{item.mensajeError ? <small>{item.mensajeError}</small> : null}</td>
         <td>{item.conciliacionEstado ? <span className={item.conciliacionEstado === "aprobada" ? "status done" : item.conciliacionEstado === "rechazada" ? "status danger" : "status pending"}>{item.conciliacionEstado}</span> : <small>Sin conciliar</small>}</td>
-        <td>{item.estado === "procesado" ? <button className="linkButton" type="button" onClick={() => verDetalle(item)}>{detalleId === item.id ? "Ocultar" : "Ver detalle"}</button> : null}</td>
+        <td><div className="matchActions">{item.estado === "procesado" ? <button className="linkButton" type="button" onClick={() => verDetalle(item)}>{detalleId === item.id ? "Ocultar" : "Ver detalle"}</button> : null}{item.archivoImportadoId ? <a className="linkButton" href={`/api/importaciones/archivos/${item.archivoImportadoId}`}>Original</a> : null}</div></td>
       </tr>)}</tbody></table></div>
       {!loading && !reportes.length ? <div className="emptyReport">Todavía no hay reportes bancarios guardados. Use el formulario superior para procesar el primer estado de cuenta.</div> : null}
     </section>
