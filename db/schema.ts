@@ -90,7 +90,7 @@ export const cuentasBancarias = pgTable("cuentas_bancarias", {
  * el hash y la versión que originaron los registros. */
 export const archivosImportados = pgTable("archivos_importados", {
   id: uuid("id").primaryKey().defaultRandom(),
-  tipo: varchar("tipo", { length: 28, enum: ["estado_bancario", "balanza", "situacion_financiera", "catalogo_contable", "auxiliar_contable"] }).notNull(),
+  tipo: varchar("tipo", { length: 28, enum: ["estado_bancario", "balanza", "situacion_financiera", "estado_resultado", "catalogo_contable", "auxiliar_contable"] }).notNull(),
   archivoNombre: text("archivo_nombre").notNull(),
   archivoMime: text("archivo_mime").notNull(),
   archivoTamano: integer("archivo_tamano").notNull(),
@@ -113,7 +113,7 @@ export const archivosImportados = pgTable("archivos_importados", {
   index("idx_archivos_importados_tipo_periodo").on(table.tipo, table.periodo),
   index("idx_archivos_importados_cuenta").on(table.cuentaBancariaNumero),
   index("idx_archivos_importados_usuario_fecha").on(table.importadoPor, table.creadoEn),
-  check("ck_archivos_importados_tipo", sql`${table.tipo} in ('estado_bancario', 'balanza', 'situacion_financiera', 'catalogo_contable', 'auxiliar_contable')`),
+  check("ck_archivos_importados_tipo", sql`${table.tipo} in ('estado_bancario', 'balanza', 'situacion_financiera', 'estado_resultado', 'catalogo_contable', 'auxiliar_contable')`),
   check("ck_archivos_importados_hash", sql`${table.archivoHashSha256} ~ '^[0-9a-f]{64}$'`),
   check("ck_archivos_importados_tamano", sql`${table.archivoTamano} >= 0 and octet_length(${table.archivoOriginal}) = ${table.archivoTamano}`),
   check("ck_archivos_importados_version", sql`${table.version} > 0`),
@@ -273,6 +273,46 @@ export const lineasSituacionFinanciera = pgTable("lineas_situacion_financiera", 
   index("idx_lineas_situacion_concepto").on(table.concepto),
   check("ck_lineas_situacion_numero", sql`${table.numeroLinea} > 0`),
   check("ck_lineas_situacion_concepto", sql`length(trim(${table.concepto})) > 0`),
+]);
+
+/** Importaciones del Estado de Resultado Integral acumulado. Conserva los tres bloques del
+ * documento fuente y los totales de control que permiten comprobar el resultado del período. */
+export const importacionesEstadoResultado = pgTable("importaciones_estado_resultado", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  archivoNombre: text("archivo_nombre").notNull(),
+  archivoTamano: integer("archivo_tamano").notNull(),
+  periodo: varchar("periodo", { length: 7 }).notNull(),
+  estado: varchar("estado", { length: 10, enum: ["procesado", "error"] }).notNull().default("procesado"),
+  totalLineas: integer("total_lineas").notNull().default(0),
+  totalIngresos: numeric("total_ingresos", { precision: 18, scale: 2 }).notNull().default("0"),
+  totalGastos: numeric("total_gastos", { precision: 18, scale: 2 }).notNull().default("0"),
+  resultadoEjercicio: numeric("resultado_ejercicio", { precision: 18, scale: 2 }).notNull().default("0"),
+  importadoPor: varchar("importado_por", { length: 40 }).notNull().references(() => usuarios.id),
+  archivoImportadoId: uuid("archivo_importado_id").references(() => archivosImportados.id, { onDelete: "restrict" }),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_importaciones_resultado_periodo").on(table.periodo),
+  index("idx_importaciones_resultado_usuario").on(table.importadoPor),
+  uniqueIndex("ux_importaciones_resultado_archivo").on(table.archivoImportadoId),
+  check("ck_importaciones_resultado_periodo", sql`${table.periodo} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  check("ck_importaciones_resultado_estado", sql`${table.estado} in ('procesado', 'error')`),
+  check("ck_importaciones_resultado_lineas", sql`${table.totalLineas} >= 0`),
+]);
+
+export const lineasEstadoResultado = pgTable("lineas_estado_resultado", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  importacionId: uuid("importacion_id").notNull().references(() => importacionesEstadoResultado.id, { onDelete: "cascade" }),
+  numeroLinea: integer("numero_linea").notNull(),
+  concepto: text("concepto").notNull(),
+  saldoInicial: numeric("saldo_inicial", { precision: 18, scale: 2 }).notNull().default("0"),
+  movimientoPeriodo: numeric("movimiento_periodo", { precision: 18, scale: 2 }).notNull().default("0"),
+  saldoFinal: numeric("saldo_final", { precision: 18, scale: 2 }).notNull().default("0"),
+  esTotal: boolean("es_total").notNull().default(false),
+}, (table) => [
+  index("idx_lineas_resultado_importacion").on(table.importacionId),
+  index("idx_lineas_resultado_concepto").on(table.concepto),
+  check("ck_lineas_resultado_numero", sql`${table.numeroLinea} > 0`),
+  check("ck_lineas_resultado_concepto", sql`length(trim(${table.concepto})) > 0`),
 ]);
 
 export const auditoriaEventos = pgTable("auditoria_eventos", {

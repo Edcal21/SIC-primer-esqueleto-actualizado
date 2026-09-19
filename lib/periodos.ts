@@ -191,6 +191,8 @@ export async function periodosConActividad(db: Db): Promise<string[]> {
     union
     select distinct periodo from importaciones_situacion_financiera
     union
+    select distinct periodo from importaciones_estado_resultado
+    union
     select distinct periodo from conciliaciones_bancarias
     order by 1 desc
   `);

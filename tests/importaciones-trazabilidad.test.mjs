@@ -39,6 +39,7 @@ test("la migración y todas las rutas de importación incluyen trazabilidad", as
   for (const route of [
     "../app/api/importaciones/balanza/route.ts",
     "../app/api/importaciones/situacion-financiera/route.ts",
+    "../app/api/importaciones/estado-resultado/route.ts",
     "../app/api/importaciones/catalogo/route.ts",
     "../app/api/importaciones/auxiliar/route.ts",
     "../app/api/banco/reportes/route.ts",

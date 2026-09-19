@@ -4,7 +4,7 @@ import type { getDb } from "../db";
 import { archivosImportados, conciliacionesArchivosImportados, conciliacionesBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../db/schema";
 import type { UsuarioSesion } from "./auth";
 
-export type TipoArchivoImportado = "estado_bancario" | "balanza" | "situacion_financiera" | "catalogo_contable" | "auxiliar_contable";
+export type TipoArchivoImportado = "estado_bancario" | "balanza" | "situacion_financiera" | "estado_resultado" | "catalogo_contable" | "auxiliar_contable";
 export type TotalesControl = Record<string, string | number>;
 type Db = ReturnType<typeof getDb>;
 
