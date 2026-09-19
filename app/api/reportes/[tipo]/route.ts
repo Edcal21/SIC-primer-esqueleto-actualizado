@@ -3,6 +3,7 @@ import { registrarAuditoria } from "../../../../lib/auditoria";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { exportarFlujoExcel } from "../../../../lib/flujo-excel";
 import { exportarCambioPatrimonioExcel } from "../../../../lib/patrimonio-excel";
+import { exportarBalanzaAnualExcel, exportarResultadoComparativoExcel, exportarSituacionComparativaExcel } from "../../../../lib/reportes-contables-excel";
 import { esTipoReporte, generarReportePorPeriodoDesdeDb, reporteCsv, type Granularidad } from "../../../../lib/reportes";
 
 export async function GET(request: Request, { params }: { params: Promise<{ tipo: string }> }) {
@@ -34,13 +35,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ tipo
         "Content-Disposition": `attachment; filename="${tipo}-${periodo}.csv"`,
       } });
     }
-    if (tipo !== "flujo-efectivo" && tipo !== "cambio-patrimonio") return jsonError("La exportación Excel no está disponible para este reporte", 400);
+    if (!["flujo-efectivo", "cambio-patrimonio", "balanza-anual", "situacion-comparativa", "resultado-comparativo"].includes(tipo)) return jsonError("La exportación Excel no está disponible para este reporte", 400);
     const esPatrimonio = tipo === "cambio-patrimonio";
-    const plantillaNombre = esPatrimonio ? "cambio-patrimonio.xlsx" : "flujo-efectivo.xlsx";
+    const esComparativo = tipo === "balanza-anual" || tipo === "situacion-comparativa" || tipo === "resultado-comparativo";
+    const plantillaNombre = esComparativo ? "reportes-comparativos.xlsx" : esPatrimonio ? "cambio-patrimonio.xlsx" : "flujo-efectivo.xlsx";
     const plantillaResponse = await fetch(new URL(`/plantillas/${plantillaNombre}`, request.url));
-    if (!plantillaResponse.ok) throw new Error(`No se pudo cargar la plantilla de ${esPatrimonio ? "cambio en el patrimonio" : "flujo de efectivo"}`);
+    if (!plantillaResponse.ok) throw new Error("No se pudo cargar la plantilla del reporte");
     const plantilla = await plantillaResponse.arrayBuffer();
-    const archivo = esPatrimonio ? exportarCambioPatrimonioExcel(reporte, plantilla) : exportarFlujoExcel(reporte, plantilla);
+    const archivo = tipo === "situacion-comparativa"
+      ? exportarSituacionComparativaExcel(reporte, plantilla)
+      : tipo === "balanza-anual"
+        ? exportarBalanzaAnualExcel(reporte, plantilla)
+        : tipo === "resultado-comparativo"
+        ? exportarResultadoComparativoExcel(reporte, plantilla)
+        : esPatrimonio
+          ? exportarCambioPatrimonioExcel(reporte, plantilla)
+          : exportarFlujoExcel(reporte, plantilla);
     const cuerpo = new ArrayBuffer(archivo.byteLength);
     new Uint8Array(cuerpo).set(archivo);
     return new Response(cuerpo, { headers: {

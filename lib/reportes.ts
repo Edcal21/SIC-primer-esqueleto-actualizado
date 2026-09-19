@@ -1,15 +1,16 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, like } from "drizzle-orm";
 import type { getDb } from "../db";
-import { importacionesBalanza, importacionesSituacionFinanciera, lineasBalanza, lineasSituacionFinanciera, reportesCatalogo } from "../db/schema";
+import { importacionesBalanza, importacionesEstadoResultado, importacionesSituacionFinanciera, lineasBalanza, lineasEstadoResultado, lineasSituacionFinanciera, reportesCatalogo } from "../db/schema";
 
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
 export type FilaReporte = { concepto: string; codigo?: string; actual: number; anterior?: number; variacion?: number; valores?: number[]; esTotal?: boolean; esEncabezado?: boolean };
 export type ValidacionReporte = { conciliado: boolean; diferencias: { concepto: string; calculado: number; estadoFinanciero: number; diferencia: number }[] };
-export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; validacion?: ValidacionReporte; generadoEn: string };
+export type ReporteFinanciero = { tipo: TipoReporte; titulo: string; descripcion: string; periodo: number; periodoComparativo?: number; periodoFuente?: string; periodoComparativoFuente?: string; granularidad?: Granularidad; moneda: "NIO"; fuente: string; columnas: string[]; filas: FilaReporte[]; validacion?: ValidacionReporte; generadoEn: string };
 type Db = ReturnType<typeof getDb>;
 type BalanzaPeriodo = { periodo: string; filas: { codigo: string; concepto: string; debe: number; haber: number; saldo: number }[] };
 type SituacionPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
+type EstadoResultadoPeriodo = { periodo: string; filas: { concepto: string; saldoFinal: number; esTotal: boolean }[] };
 const filaComparativa = (concepto:string, actual:number, anterior:number, extra:Partial<FilaReporte>={}):FilaReporte => ({ concepto, actual, anterior, variacion:actual-anterior, ...extra });
 const ceroLimpio = (valor: number) => Object.is(valor, -0) ? 0 : valor;
 
@@ -50,6 +51,14 @@ function datosPeriodo(granularidad:Granularidad, periodo:string){
 }
 
 const periodoBalanza = (granularidad: Granularidad, periodo: string) => granularidad === "anio" ? `${periodo.slice(0,4)}-12` : periodo.slice(0,7);
+const periodoEstadoResultado = (granularidad: Granularidad, periodo: string) => {
+  if (granularidad === "anio") return `${periodo.slice(0, 4)}-12`;
+  if (granularidad === "trimestre") {
+    const trimestre = Number(periodo.split("T")[1]);
+    return `${periodo.slice(0, 4)}-${String(trimestre * 3).padStart(2, "0")}`;
+  }
+  return periodo.slice(0, 7);
+};
 const claseCuenta = (codigo: string) => codigo.startsWith("1") ? "activo" : codigo.startsWith("2") ? "pasivo" : codigo.startsWith("3") ? "patrimonio" : codigo.startsWith("4") ? "ingreso" : codigo.startsWith("5") ? "gasto" : "otra";
 
 async function obtenerBalanza(db: Db, periodo: string): Promise<BalanzaPeriodo | null> {
@@ -57,6 +66,39 @@ async function obtenerBalanza(db: Db, periodo: string): Promise<BalanzaPeriodo |
   if (!importacion) return null;
   const filas = await db.select().from(lineasBalanza).where(eq(lineasBalanza.importacionId, importacion.id));
   return { periodo: importacion.periodo, filas: filas.map(fila => ({ codigo: fila.cuentaCodigo, concepto: fila.cuentaNombre, debe: Number(fila.debe), haber: Number(fila.haber), saldo: Number(fila.saldo) })) };
+}
+
+async function obtenerBalanzasAnio(db: Db, anio: number): Promise<BalanzaPeriodo[]> {
+  const importaciones = await db.select().from(importacionesBalanza)
+    .where(like(importacionesBalanza.periodo, `${anio}-%`))
+    .orderBy(desc(importacionesBalanza.creadoEn));
+  const ultimaPorMes = new Map<string, typeof importaciones[number]>();
+  for (const importacion of importaciones) {
+    if (!ultimaPorMes.has(importacion.periodo)) ultimaPorMes.set(importacion.periodo, importacion);
+  }
+  const periodos: BalanzaPeriodo[] = [];
+  for (const importacion of [...ultimaPorMes.values()].sort((a, b) => a.periodo.localeCompare(b.periodo))) {
+    const filas = await db.select().from(lineasBalanza).where(eq(lineasBalanza.importacionId, importacion.id));
+    periodos.push({
+      periodo: importacion.periodo,
+      filas: filas.map(fila => ({ codigo: fila.cuentaCodigo, concepto: fila.cuentaNombre, debe: Number(fila.debe), haber: Number(fila.haber), saldo: Number(fila.saldo) })),
+    });
+  }
+  return periodos;
+}
+
+async function obtenerEstadoResultado(db: Db, periodo: string): Promise<EstadoResultadoPeriodo | null> {
+  const [importacion] = await db.select().from(importacionesEstadoResultado)
+    .where(eq(importacionesEstadoResultado.periodo, periodo))
+    .orderBy(desc(importacionesEstadoResultado.creadoEn)).limit(1);
+  if (!importacion) return null;
+  const filas = await db.select().from(lineasEstadoResultado)
+    .where(eq(lineasEstadoResultado.importacionId, importacion.id))
+    .orderBy(asc(lineasEstadoResultado.numeroLinea));
+  return {
+    periodo: importacion.periodo,
+    filas: filas.map(fila => ({ concepto: fila.concepto, saldoFinal: Number(fila.saldoFinal), esTotal: fila.esTotal })),
+  };
 }
 
 async function obtenerSituacionFinanciera(db: Db, periodo: string): Promise<SituacionPeriodo | null> {
@@ -252,14 +294,98 @@ function totalClase(filas: BalanzaPeriodo["filas"], clase: string) {
   return filasDetalle(filas).filter(fila => claseCuenta(fila.codigo) === clase).reduce((total, fila) => total + fila.saldo, 0);
 }
 
+const esSaldoDeudor = (codigo: string) => ["activo", "gasto", "otra"].includes(claseCuenta(codigo));
+
+/** Consolida las balanzas mensuales del año sin sumar saldos finales entre meses. */
+export function reporteBalanzaAnualDesdeMeses(periodos: BalanzaPeriodo[], anio: number): ReporteFinanciero {
+  const ordenados = [...periodos].filter(item => item.periodo.startsWith(`${anio}-`)).sort((a, b) => a.periodo.localeCompare(b.periodo));
+  const enero = ordenados.find(item => item.periodo === `${anio}-01`);
+  if (!enero) throw new Error(`No hay balanza de enero ${anio}; se necesita para obtener el saldo inicial anual`);
+  const ultimoMes = Number(ordenados.at(-1)!.periodo.slice(5, 7));
+  const mesesDisponibles = new Set(ordenados.map(item => item.periodo));
+  const mesesFaltantes = Array.from({ length: ultimoMes }, (_, indice) => `${anio}-${String(indice + 1).padStart(2, "0")}`)
+    .filter(periodo => !mesesDisponibles.has(periodo));
+  if (mesesFaltantes.length) throw new Error(`Faltan balanzas mensuales para completar el período anual: ${mesesFaltantes.join(", ")}`);
+
+  const ordenCodigos: string[] = [];
+  const cuentas = new Map<string, { concepto: string; saldoInicial: number; debe: number; haber: number }>();
+  for (const periodo of ordenados) {
+    for (const fila of periodo.filas) {
+      if (!cuentas.has(fila.codigo)) {
+        ordenCodigos.push(fila.codigo);
+        cuentas.set(fila.codigo, { concepto: fila.concepto, saldoInicial: 0, debe: 0, haber: 0 });
+      }
+      const cuenta = cuentas.get(fila.codigo)!;
+      cuenta.concepto = fila.concepto || cuenta.concepto;
+      cuenta.debe += fila.debe;
+      cuenta.haber += fila.haber;
+      if (periodo.periodo === `${anio}-01`) {
+        cuenta.saldoInicial = esSaldoDeudor(fila.codigo)
+          ? fila.saldo - fila.debe + fila.haber
+          : fila.saldo - fila.haber + fila.debe;
+      }
+    }
+  }
+
+  const filas: FilaReporte[] = ordenCodigos.map(codigo => {
+    const cuenta = cuentas.get(codigo)!;
+    const deudora = esSaldoDeudor(codigo);
+    const saldoFinal = deudora
+      ? cuenta.saldoInicial + cuenta.debe - cuenta.haber
+      : cuenta.saldoInicial + cuenta.haber - cuenta.debe;
+    const valores = deudora
+      ? [cuenta.saldoInicial, 0, cuenta.debe, cuenta.haber, saldoFinal, 0]
+      : [0, cuenta.saldoInicial, cuenta.debe, cuenta.haber, 0, saldoFinal];
+    const valoresRedondeados = valores.map(valor => ceroLimpio(redondearCentavos(valor)));
+    return { codigo, concepto: cuenta.concepto, actual: redondearCentavos(saldoFinal), valores: valoresRedondeados };
+  });
+
+  const mayores = filas.filter(fila => /^[1-5]0{7}$/.test(fila.codigo ?? ""));
+  const baseTotales = mayores.length ? mayores : filasDetalle(ordenados.at(-1)?.filas ?? []).map(detalle => filas.find(fila => fila.codigo === detalle.codigo)!).filter(Boolean);
+  const totales = Array.from({ length: 6 }, (_, indice) => redondearCentavos(baseTotales.reduce((total, fila) => total + (fila.valores?.[indice] ?? 0), 0)));
+  filas.push({ concepto: "Saldos", actual: totales[4], valores: totales, esTotal: true });
+
+  const meta = catalogoReportes.find(item => item.tipo === "balanza-anual")!;
+  return {
+    tipo: "balanza-anual", titulo: meta.titulo, descripcion: meta.descripcion,
+    periodo: anio, periodoComparativo: anio - 1,
+    periodoFuente: ordenados.at(-1)!.periodo,
+    moneda: "NIO", fuente: `Balanzas mensuales ${ordenados[0].periodo} a ${ordenados.at(-1)!.periodo}`,
+    columnas: ["Cuenta", `Debe ${anio - 1}`, `Haber ${anio - 1}`, `Debe ${anio}`, `Haber ${anio}`, `Debe acumulado ${anio}`, `Haber acumulado ${anio}`],
+    filas, generadoEn: new Date().toISOString(),
+  };
+}
+
+/** Compara el Saldo Final de dos Estados de Resultado Integral importados. */
+export function reporteResultadoComparativoDesdeEstados(actual: EstadoResultadoPeriodo, anterior: EstadoResultadoPeriodo, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
+  const filasAnteriores = new Map<string, EstadoResultadoPeriodo["filas"]>();
+  for (const fila of anterior.filas) {
+    const clave = claveConcepto(fila.concepto);
+    filasAnteriores.set(clave, [...(filasAnteriores.get(clave) ?? []), fila]);
+  }
+  const filas = actual.filas.map(fila => {
+    const clave = claveConcepto(fila.concepto);
+    const coincidencias = filasAnteriores.get(clave) ?? [];
+    const filaAnterior = coincidencias.shift();
+    if (coincidencias.length) filasAnteriores.set(clave, coincidencias); else filasAnteriores.delete(clave);
+    return filaComparativa(fila.concepto, fila.saldoFinal, filaAnterior?.saldoFinal ?? 0, { esTotal: fila.esTotal || filaAnterior?.esTotal });
+  });
+  for (const pendientes of filasAnteriores.values()) {
+    for (const fila of pendientes) filas.push(filaComparativa(fila.concepto, 0, fila.saldoFinal, { esTotal: fila.esTotal }));
+  }
+  const meta = catalogoReportes.find(item => item.tipo === "resultado-comparativo")!;
+  return {
+    tipo: "resultado-comparativo", titulo: meta.titulo, descripcion: meta.descripcion,
+    periodo: Number(actual.periodo.slice(0, 4)), periodoComparativo: Number(anterior.periodo.slice(0, 4)),
+    periodoFuente: actual.periodo, periodoComparativoFuente: anterior.periodo,
+    moneda: "NIO", fuente: `Estados de Resultado Integral ${actual.periodo} y ${anterior.periodo}`,
+    columnas: ["Concepto", etiqueta, etiquetaComparativa, "Variación"], filas, generadoEn: new Date().toISOString(),
+  };
+}
+
 export function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anterior: BalanzaPeriodo | null, etiqueta: string, etiquetaComparativa: string): ReporteFinanciero {
   const meta = catalogoReportes.find(item => item.tipo === tipo)!;
-  if (tipo === "balanza-anual") {
-    const filas: FilaReporte[] = actual.filas.map(fila => ({ codigo: fila.codigo, concepto: fila.concepto, actual: fila.debe, anterior: fila.haber, variacion: fila.debe - fila.haber }));
-    const debitos = filas.reduce((total, fila) => total + fila.actual, 0), creditos = filas.reduce((total, fila) => total + (fila.anterior ?? 0), 0);
-    filas.push({ concepto: "Total", actual: debitos, anterior: creditos, variacion: debitos - creditos, esTotal: true });
-    return { tipo, titulo: meta.titulo, descripcion: meta.descripcion, periodo: Number(actual.periodo.slice(0,4)), moneda: "NIO", fuente: `Balanza importada ${actual.periodo}`, columnas: ["Cuenta", "Débito", "Crédito", "Diferencia"], filas, generadoEn: new Date().toISOString() };
-  }
+  if (tipo === "balanza-anual") throw new Error("La balanza anual requiere consolidar las balanzas mensuales");
 
   const anteriores = new Map((anterior?.filas ?? []).map(fila => [fila.codigo, fila]));
   const clases = tipo === "resultado-comparativo" ? ["ingreso", "gasto"] : ["patrimonio"];
@@ -283,6 +409,22 @@ export function reporteBalanza(tipo: TipoReporte, actual: BalanzaPeriodo, anteri
 export async function generarReportePorPeriodoDesdeDb(db: Db, tipo: TipoReporte, granularidad: Granularidad, periodo: string, comparar: string): Promise<ReporteFinanciero & { granularidad: Granularidad; periodoEtiqueta: string; comparativoEtiqueta: string }> {
   if (tipo === "minutas") throw new Error("El reporte de minutas utiliza filtros de iglesia y rango de fechas");
   const actualDatos = datosPeriodo(granularidad, periodo), anteriorDatos = datosPeriodo(granularidad, comparar);
+  if (tipo === "balanza-anual") {
+    const balanzas = await obtenerBalanzasAnio(db, actualDatos.anio);
+    if (!balanzas.length) throw new Error(`No hay balanzas mensuales importadas para ${actualDatos.anio}`);
+    const reporte = reporteBalanzaAnualDesdeMeses(balanzas, actualDatos.anio);
+    return { ...reporte, granularidad: "anio", periodoEtiqueta: String(actualDatos.anio), comparativoEtiqueta: String(actualDatos.anio - 1) };
+  }
+  if (tipo === "resultado-comparativo") {
+    const periodoActual = periodoEstadoResultado(granularidad, periodo);
+    const periodoAnterior = periodoEstadoResultado(granularidad, comparar);
+    const actual = await obtenerEstadoResultado(db, periodoActual);
+    if (!actual) throw new Error(`No hay Estado de Resultado Integral importado para ${periodoActual}`);
+    const anterior = await obtenerEstadoResultado(db, periodoAnterior);
+    if (!anterior) throw new Error(`No hay Estado de Resultado Integral importado para el período comparativo ${periodoAnterior}`);
+    const reporte = reporteResultadoComparativoDesdeEstados(actual, anterior, actualDatos.etiqueta, anteriorDatos.etiqueta);
+    return { ...reporte, granularidad, periodoEtiqueta: actualDatos.etiqueta, comparativoEtiqueta: anteriorDatos.etiqueta };
+  }
   if (tipo === "flujo-efectivo" || tipo === "situacion-comparativa" || tipo === "cambio-patrimonio") {
     const esCambioPatrimonio = tipo === "cambio-patrimonio";
     const periodoActual = esCambioPatrimonio ? `${periodo.slice(0, 4)}-12` : periodoBalanza(granularidad, periodo);
