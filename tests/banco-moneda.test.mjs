@@ -2,7 +2,7 @@
 // DATABASE_URL configurado (ver .dev.vars); se documentan como suite separada (`pnpm test:db`)
 // porque, a diferencia del resto de `pnpm test`, necesitan una base de datos disponible.
 import assert from "node:assert/strict";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import test, { after, before } from "node:test";
@@ -66,6 +66,10 @@ async function limpiar() {
 
 before(async () => {
   await limpiar();
+  // El seed de producción marca a usr-contador/usr-banco/usr-auditor con rotación de contraseña
+  // pendiente (sin permisos hasta que la completen). Estas pruebas simulan usuarios que ya
+  // operan normalmente, no el primer inicio de sesión tras la migración.
+  await db.update(schema.usuarios).set({ debeCambiarPassword: false }).where(inArray(schema.usuarios.id, ["usr-contador", "usr-banco", "usr-auditor"]));
   await db.insert(schema.iglesias).values({ codigo: IGLESIA, nombre: "Iglesia de prueba" });
   await db.insert(schema.cuentasBancarias).values([
     { numeroCuenta: CUENTA_USD, nombre: "Cuenta USD de prueba A", moneda: "USD" },
@@ -298,7 +302,11 @@ async function rutas() {
     import('../app/api/movimientos/[id]/route.ts'),
     import('../lib/auth.ts'),
   ]);
-  const enviar = (fn, id, body, usuario = 'usr-banco') => fn(new Request('http://localhost/api/test', {
+  // Con la redistribución de permisos de drizzle/0029_roles_contador_finanzas.sql, "Finanzas"
+  // (antes usr-banco) ya no gestiona conciliaciones directamente; solo Contador tiene
+  // conciliacion:gestionar/aprobar. El actor por defecto de estas pruebas de conciliación cambia
+  // en consecuencia.
+  const enviar = (fn, id, body, usuario = 'usr-contador') => fn(new Request('http://localhost/api/test', {
     method:'PATCH', headers:{'Content-Type':'application/json', cookie:crearCookieSesion({id:usuario}).split(';')[0]}, body:JSON.stringify(body),
   }), {params:Promise.resolve({id})});
   return {conciliar,anular,enviar};
@@ -322,7 +330,7 @@ test('USD histórico no enlaza manualmente ni permite aprobar un enlace inválid
   assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar' ,lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,409);
   // Simular un enlace incorrecto previo a la corrección.
   await db.update(schema.lineasReporteBancario).set({estadoConciliacion:'conciliada',movimientoId:e.movimiento.id}).where(eq(schema.lineasReporteBancario.id,e.linea.id));
-  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin')).status,409);
+  assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-contador')).status,409);
 });
 
 test('anular y conciliar concurrentemente no deja una minuta anulada enlazada', async () => {
@@ -344,7 +352,7 @@ test('reabrir y aprobar simultáneamente mantienen estado coherente', async () =
   assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,200);
   const resultados = await Promise.all([
     enviar(conciliar,e.conciliacion.id,{accion:'reabrir',lineaId:e.linea.id}),
-    enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin'),
+    enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-contador'),
   ]);
   assert.equal(resultados.filter(r=>r.status===200).length,1);
   const [c] = await db.select().from(schema.conciliacionesBancarias).where(eq(schema.conciliacionesBancarias.id,e.conciliacion.id));
@@ -356,7 +364,7 @@ test('dos aprobaciones simultáneas producen una transición y un evento', async
   const e = await escenario('CARRERA-APROBAR');
   const {conciliar,enviar} = await rutas();
   assert.equal((await enviar(conciliar,e.conciliacion.id,{accion:'conciliar',lineaId:e.linea.id,movimientoId:e.movimiento.id})).status,200);
-  const resultados = await Promise.all([1,2].map(()=>enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-admin')));
+  const resultados = await Promise.all([1,2].map(()=>enviar(conciliar,e.conciliacion.id,{accion:'aprobar'},'usr-contador')));
   assert.deepEqual(resultados.map(r=>r.status).sort(),[200,409]);
   const eventos = await db.select().from(schema.auditoriaEventos).where(and(eq(schema.auditoriaEventos.entidadId,e.conciliacion.id),eq(schema.auditoriaEventos.accion,'Aprobó conciliación bancaria')));
   assert.equal(eventos.length,1);

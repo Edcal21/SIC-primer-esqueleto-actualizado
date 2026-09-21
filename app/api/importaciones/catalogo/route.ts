@@ -5,6 +5,7 @@ import { registrarAuditoria } from "../../../../lib/auditoria";
 import { leerCatalogoContable } from "../../../../lib/catalogo";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { verificarRateLimit } from "../../../../lib/security";
+import { prepararEvidenciaArchivo, registrarArchivoImportado } from "../../../../lib/importaciones";
 
 function valorTexto(value: unknown) {
   return String(value ?? "").trim();
@@ -25,14 +26,17 @@ export async function POST(request: Request) {
   if (archivo.size > 10 * 1024 * 1024) return jsonError("El archivo supera el límite de 10 MB", 413);
   if (!/\.(csv|xlsx|xls)$/i.test(archivo.name)) return jsonError("Formato no permitido; use CSV o Excel", 415);
 
+  const db = getDb();
+  const evidencia = await prepararEvidenciaArchivo(archivo);
   let catalogo;
   try {
-    catalogo = leerCatalogoContable(await archivo.arrayBuffer());
+    catalogo = leerCatalogoContable(evidencia.arrayBuffer);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "No se pudo leer el catálogo contable", 400);
+    const mensaje = error instanceof Error ? error.message : "No se pudo leer el catálogo contable";
+    await db.transaction(tx => registrarArchivoImportado(tx, { evidencia, tipo: "catalogo_contable", user, cantidadRegistros: 0, estado: "error", mensajeError: mensaje }));
+    return jsonError(mensaje, 400);
   }
 
-  const db = getDb();
   try {
     const result = await db.transaction(async tx => {
       let creadas = 0;
@@ -70,13 +74,18 @@ export async function POST(request: Request) {
         else creadas += 1;
       }
 
+      const archivoImportado = await registrarArchivoImportado(tx, {
+        evidencia, tipo: "catalogo_contable", user, cantidadRegistros: catalogo.filas.length,
+        totalesControl: { cuentasMovimiento: catalogo.cuentasMovimiento, cuentasActivas: catalogo.cuentasActivas, creadas, actualizadas },
+      });
+
       await registrarAuditoria(tx, {
         user,
         modulo: "Catálogo contable",
         accion: "Importó catálogo contable",
         entidad: "cuentas_contables",
-        entidadId: archivo.name,
-        detalle: `${archivo.name} · ${catalogo.filas.length} cuentas · ${catalogo.cuentasMovimiento} de movimiento · ${catalogo.cuentasActivas} activas`,
+        entidadId: archivoImportado.id,
+        detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${catalogo.filas.length} cuentas · ${catalogo.cuentasMovimiento} de movimiento · ${catalogo.cuentasActivas} activas`,
       });
 
       return {
@@ -87,6 +96,7 @@ export async function POST(request: Request) {
         cuentasActivas: catalogo.cuentasActivas,
         creadas,
         actualizadas,
+        archivoImportado: { id: archivoImportado.id, version: archivoImportado.version, hashSha256: archivoImportado.archivoHashSha256 },
       };
     });
 

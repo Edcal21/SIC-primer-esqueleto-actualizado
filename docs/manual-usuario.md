@@ -160,6 +160,7 @@ Use la opción **Cerrar sesión** del menú. Es obligatorio al terminar la jorna
 - La contraseña es personal e intransferible.
 - No se comparte, no se anota junto al equipo, no se envía por chat ni correo.
 - Si olvidó su contraseña, solicite al **Administrador** que la restablezca. No existe recuperación automática por correo.
+- Al activarse una rotación obligatoria (por ejemplo, tras una migración de seguridad), el sistema bloquea el acceso a cualquier módulo hasta que la persona defina una contraseña nueva de al menos 12 caracteres, distinta de la actual. Esa pantalla aparece automáticamente al iniciar sesión; no hay forma de omitirla.
 
 > **Importante:** toda operación queda registrada con el usuario que la ejecutó. Prestar el usuario significa asumir la responsabilidad de lo que otra persona haga con él.
 
@@ -173,28 +174,30 @@ El sistema tiene cuatro roles. Cada uno ve solamente los módulos que necesita.
 
 | Rol | Responsabilidad principal |
 |---|---|
-| **Administrador** | Configura el sistema, administra usuarios y catálogos, aprueba conciliaciones y cierra períodos |
-| **Contador general** | Importa la balanza de comprobación y genera los reportes financieros |
-| **Operador bancario** | Registra minutas, carga estados de cuenta y prepara las conciliaciones |
-| **Auditor general** | Consulta reportes y bitácora de auditoría. No modifica nada |
+| **Administrador** | Rol técnico de arranque; en operación normal queda **inactivo** y sus funciones las asume Contador |
+| **Contador** | Administra usuarios, roles, catálogo, iglesias y cuentas bancarias; gestiona y aprueba conciliaciones; importa estados financieros y descarga reportes; cierra períodos |
+| **Finanzas** | Registra minutas y carga estados de cuenta bancarios; no concilia ni ve el centro de reportes financieros |
+| **Auditor general** | Consulta bancos, conciliaciones, reportes y bitácora de auditoría. No modifica nada |
+
+> **Nota:** los nombres anteriores de estos roles eran "Contador general" y "Operador bancario". El usuario **Administrador** genérico queda desactivado desde que se aplica esta versión: el rol **Contador** absorbe casi todos sus permisos, de modo que siempre hay alguien con acceso administrativo sin depender de una cuenta compartida.
 
 ### 4.2 Qué módulo ve cada rol
 
-| Módulo del menú | Administrador | Contador general | Operador bancario | Auditor general |
-|---|:--:|:--:|:--:|:--:|
-| Resumen | ✅ | ✅ | ✅ | ✅ |
-| Registrar movimiento | — | — | ✅ | — |
-| Minutas | — | — | ✅ | — |
-| Bancos | ✅ | — | ✅ | ✅ |
-| Conciliación | ✅ | — | ✅ | ✅ |
-| Importaciones | — | ✅ | — | — |
-| Reportes | ✅ | ✅ | ✅ | ✅ |
-| Usuarios | ✅ | — | — | — |
-| Catálogo contable | ✅ | — | — | — |
-| Iglesias | ✅ | — | — | — |
-| Cierre contable | ✅ | — | — | — |
-| Configuración | ✅ | — | — | — |
-| Auditoría | ✅ | — | — | ✅ |
+| Módulo del menú | Contador | Finanzas | Auditor general |
+|---|:--:|:--:|:--:|
+| Resumen | ✅ | ✅ | ✅ |
+| Registrar movimiento | — | ✅ | — |
+| Minutas | — | ✅ | — |
+| Bancos | ✅ | ✅ | ✅ |
+| Conciliación | ✅ | — | ✅ (solo consulta) |
+| Importaciones | ✅ | — | — |
+| Reportes | ✅ | — | ✅ |
+| Usuarios | ✅ | — | — |
+| Catálogo contable | ✅ | — | — |
+| Iglesias | ✅ | — | — |
+| Cierre contable | ✅ | — | — |
+| Configuración | ✅ | — | — |
+| Auditoría | ✅ | — | ✅ |
 
 La matriz detallada por permiso individual está en el **Anexo A**.
 
@@ -202,9 +205,9 @@ La matriz detallada por permiso individual está en el **Anexo A**.
 
 El diseño separa deliberadamente **quien prepara** de **quien aprueba**:
 
-- El **operador bancario** carga el estado de cuenta y enlaza las líneas, pero **no puede aprobar** la conciliación.
-- El **administrador** aprueba conciliaciones y cierra períodos, pero **no registra minutas ni importa balanza**.
-- El **auditor general** ve todo lo relevante y **no puede modificar nada**.
+- **Finanzas** carga el estado de cuenta pero **no puede enlazar líneas ni aprobar** la conciliación: esas acciones exigen el permiso `conciliacion:gestionar`/`conciliacion:aprobar`, que solo tiene Contador.
+- **Contador** gestiona y aprueba conciliaciones, importa estados financieros y cierra períodos.
+- El **auditor general** ve todo lo relevante (incluida la conciliación, en solo lectura) y **no puede modificar nada**.
 
 > **Nota para la institución:** si una misma persona debe cubrir dos funciones, el Administrador puede ajustar los permisos del rol desde **Usuarios → Roles**. Hacerlo reduce el control interno; debe quedar autorizado por escrito.
 
@@ -284,9 +287,11 @@ Todas las capturas se tomaron con datos de prueba. Los importes, iglesias y núm
 
 ---
 
-## 6. Operador bancario
+## 6. Finanzas
 
-**Usuario de ejemplo:** `banco` · **Rol:** Operador bancario
+**Usuario de ejemplo:** `banco` · **Rol:** Finanzas (antes "Operador bancario")
+
+> **Cambio de permisos:** Finanzas ya **no ve Conciliación** en su menú ni puede enlazar, descartar o reabrir líneas bancarias (eso ahora exige `conciliacion:gestionar`, permiso exclusivo de Contador). Las secciones 6.4 y siguientes de este capítulo describen el flujo de conciliación tal como lo hacía el antiguo "Operador bancario"; en la versión actual, ese flujo lo ejecuta **Contador** (ver capítulo 7). Finanzas conserva Registrar movimiento, Minutas, y la carga de estados de cuenta bancarios (sección 6.3).
 
 Su menú tiene seis opciones:
 
@@ -482,13 +487,13 @@ Para cuentas en dólares, vea el **capítulo 11**.
 
 ---
 
-## 7. Contador general
+## 7. Contador
 
-**Usuario de ejemplo:** `contador` · **Rol:** Contador general
+**Usuario de ejemplo:** `contador` · **Rol:** Contador (antes "Contador general")
 
-Su menú tiene tres opciones: **Resumen**, **Importaciones** y **Reportes**.
+Contador es el rol con más alcance del sistema en operación normal: ve **Resumen, Usuarios, Catálogo contable, Iglesias, Bancos, Conciliación, Importaciones, Reportes, Cierre contable, Configuración y Auditoría**. Absorbe casi todo lo que antes hacía el Administrador genérico, que queda desactivado (ver 4.1).
 
-> **El contador general no ve Bancos ni Conciliación.** Si necesita consultar una conciliación, debe solicitarla al Administrador o al Auditor. Está documentado como comportamiento actual del sistema; si la institución necesita otra cosa, el Administrador puede ajustar el rol (ver 4.3).
+> Si su instalación todavía no aplicó la migración de roles que introduce este capítulo, es posible que su usuario vea un menú más reducido (el de la sección anterior de este manual, "Contador general"). Confirme con quien administra el sistema si esa migración ya corrió.
 
 ---
 
@@ -498,13 +503,14 @@ Su menú tiene tres opciones: **Resumen**, **Importaciones** y **Reportes**.
 
 ![Pantalla Importaciones contables](img/contador-importaciones.png)
 
-La pantalla reúne **cuatro importadores**:
+La pantalla reúne **cinco importadores**:
 
 | Importador | Qué carga | Campos esperados |
 |---|---|---|
 | **Catálogo contable** | Cuentas contables | Código/Cuenta y Descripción/Nombre. Opcionales: Nivel, Padre, Naturaleza, Flujo, Movimiento, Estado |
 | **Auxiliar contable** | Egresos o movimientos, como minutas cuadradas | Fecha, Iglesia, Cuenta bancaria, Referencia, Concepto… |
-| **Estado de situación financiera** | Saldos finales por período. Es la **fuente exclusiva del flujo de efectivo** | Descripción, Saldo Final |
+| **Estado de situación financiera** | Saldos finales por período. Es la **fuente del flujo de efectivo y del cambio en el patrimonio** | Descripción, Saldo Final |
+| **Estado de Resultado Integral** | Saldo inicial, movimiento del período y saldo final por concepto | Descripción, Saldo Inicial, Movimiento del período, Saldo Final |
 | **Balanza de comprobación** | Balanza mensual | Cuenta, Descripción, Saldo Inicial, Débitos, Créditos, Saldo Final |
 
 Cada panel muestra los **campos reconocidos** del archivo antes de importar. Revíselos: si un campo esperado no aparece ahí, el archivo tiene los encabezados mal.
@@ -522,20 +528,16 @@ Cada panel muestra los **campos reconocidos** del archivo antes de importar. Rev
 | Estado | Significado | Qué hacer |
 |---|---|---|
 | **Procesado** | El archivo cuadra | Continuar |
-| **Con diferencias** | Débitos y créditos no cuadran | **No continúe.** Corrija en el origen y vuelva a importar |
-| **Error** | El archivo no se pudo leer | Revise formato y encabezados (Anexo B) |
+| **Con diferencias** | Débitos y créditos no cuadran (balanza y estado de situación financiera) | **No continúe.** Corrija en el origen y vuelva a importar |
+| **Error** | El archivo no se pudo leer, o no cuadra (catálogo, auxiliar, Estado de Resultado Integral) | Revise formato y encabezados (Anexo B) |
 
-> ### ⚠️ Importar catálogo contable: limitación conocida
+> ### La balanza ya no crea cuentas automáticamente
 >
-> El panel **Importar catálogo contable** aparece en su pantalla, pero **no funciona con su usuario**. Al intentarlo, el sistema responde:
+> Antes, un código de cuenta que no existía en el catálogo se creaba solo al importar la balanza. Ahora la balanza **valida contra el catálogo contable existente**: si una cuenta no existe, está inactiva, o es de mayor/título (no de movimiento), la importación completa se rechaza con el detalle de qué línea falla.
 >
-> *"No tiene permiso para importar catálogo contable"* (HTTP 403)
->
-> Ese importador exige el permiso `catalogo:administrar`, que corresponde al **Administrador**.
->
-> **Solicite la importación del catálogo al Administrador.** No es una falla de su archivo ni de su sesión.
->
-> _(Comportamiento verificado en la versión entregada. Ver nota técnica en el capítulo 14.)_
+> **Importe o actualice el catálogo contable primero** (mismo panel de Importaciones, o Menú → Catálogo contable) antes de importar una balanza con cuentas nuevas.
+
+**Trazabilidad de archivos.** Al final de la pantalla de Importaciones hay una tabla **Trazabilidad de archivos** con todas las versiones de todo lo importado (de cualquier tipo), su huella SHA-256 y un botón **Descargar** para recuperar el archivo original exacto que se cargó. Sirve para responder "¿de qué archivo salió este número?" sin depender de que alguien lo haya guardado por su cuenta.
 
 ---
 
@@ -564,7 +566,7 @@ Cada panel muestra los **campos reconocidos** del archivo antes de importar. Rev
 > **El reporte de minutas no usa período/comparar como los demás.** Se filtra por rango de fechas (Desde/Hasta) y, opcionalmente, por iglesia — pensado para auditorías puntuales o para revisar qué se registró en un rango específico, no para comparar dos períodos contables.
 4. Genere y descargue.
 
-El **flujo de efectivo** se exporta a Excel con el **formato oficial** de la institución, a partir de la plantilla incluida en el sistema.
+El **flujo de efectivo** y el **estado de cambio en el patrimonio** se exportan a Excel con el **formato oficial** de la institución, a partir de las plantillas incluidas en el sistema.
 
 > **El flujo de efectivo se alimenta del Estado de Situación Financiera importado**, comparando el campo *Saldo Final* entre períodos. Si no importó ese estado, el reporte no tiene fuente de datos.
 
@@ -582,17 +584,21 @@ Sobre la tabla puede aparecer un recuadro **«Revise antes de emitir»**. No blo
 
 **Estado de cambio en el patrimonio**
 
-A diferencia de los demás reportes, este se alimenta de la **balanza de comprobación** (no del Estado de Situación Financiera) y es **exclusivamente anual** — comparando el cierre del 31 de diciembre de dos años consecutivos. Si se selecciona con granularidad Mes, Trimestre o Día, el sistema lo rechaza con un mensaje pidiendo cambiar a la vista Año.
+Se alimenta del **Estado de Situación Financiera** (igual que el flujo de efectivo) y es **exclusivamente anual** — comparando el cierre del 31 de diciembre de dos años consecutivos, en el **formato oficial de 6 columnas** (Patrimonio, Patrimonio donado, Utilidades acumuladas, Revaluación, Utilidad del ejercicio, Total). Si se selecciona con granularidad Mes, Trimestre o Día, el sistema lo rechaza con un mensaje pidiendo cambiar a la vista Año.
 
-El reporte muestra los saldos de patrimonio al cierre del año anterior, los movimientos del ejercicio, los saldos al cierre del año actual, y un bloque de **control** al final: contrasta el resultado del ejercicio anterior (lo que debería trasladarse a Utilidades Acumuladas) contra la variación real de esa cuenta entre ambos años. Si no coinciden, el sistema no lo oculta ni lo fuerza a cuadrar — muestra la diferencia exacta y advierte en el recuadro **«Revise antes de emitir»** que puede haber un ajuste contable adicional registrado en Utilidades Acumuladas durante el ejercicio, a verificar con contabilidad antes de emitir el reporte.
+El reporte muestra los saldos de apertura al cierre del año anterior, el traslado a Utilidades Acumuladas, una línea de **Pago de Impuesto IR** y las utilidades del ejercicio actual, con una fila de totales. Se autovalida: compara cada columna calculada contra lo que el propio Estado de Situación Financiera reporta al cierre actual y muestra un recuadro **«Validado»** o **«Revisión requerida»** con la diferencia exacta si no concilia — nunca fuerza un cuadre que no existe.
 
-> **El contador general es, junto con el auditor, uno de los dos roles con permiso de descarga** (`reportes:descargar`). El operador bancario puede ver los reportes pero no descargarlos.
+> **Sobre la línea "Pago de Impuesto IR":** toma el saldo de la cuenta "PAGO MINIMO DEFINITIVO" del período anterior como hipótesis de cómo se traslada el pago de IR al patrimonio. **No está confirmada con contabilidad.** Que el recuadro diga «Validado» significa que las cifras se autoconcilian con esa hipótesis — no que la hipótesis en sí sea correcta. Verifique con contabilidad el origen real de esta línea antes de tomar el reporte como definitivo para efectos legales o de auditoría externa.
+
+> **Contador es el único rol con permiso de descarga** (`reportes:descargar`) además del Auditor. Finanzas no tiene acceso al centro de reportes financieros.
 
 ---
 
-## 8. Administrador
+## 8. Administrador (rol técnico — normalmente inactivo)
 
 **Usuario de ejemplo:** `administrador` · **Rol:** Administrador
+
+> **En operación normal, el usuario `administrador` está desactivado.** Sus funciones las cubre el rol **Contador** (capítulo 7), que además administra usuarios/roles, catálogo, iglesias, cuentas bancarias y cierre contable — todo lo que este capítulo describe. El Administrador genérico existe solo como rol técnico de arranque del sistema (antes de que existan usuarios operativos) y no debe reactivarse para uso diario; hacerlo reintroduce una cuenta compartida sin dueño individual, lo que rompe la trazabilidad de auditoría.
 
 Su menú tiene nueve opciones:
 
@@ -601,7 +607,7 @@ Su menú tiene nueve opciones:
 | Operativa | Resumen · Bancos · Conciliación |
 | Gestión | Usuarios · Catálogo contable · Iglesias · Auditoría · Cierre contable · Configuración |
 
-> **El Administrador no registra minutas ni importa balanza.** No tiene `movimientos:escribir` ni `importaciones:administrar`. Es separación de funciones: administra, aprueba y cierra; no captura.
+> **El Administrador no registra minutas ni importa balanza.** No tiene `movimientos:escribir` ni `importaciones:administrar`. Es separación de funciones: administra, aprueba y cierra; no captura. (Contador, en cambio, sí tiene `importaciones:administrar` — ver capítulo 7.)
 
 ---
 
@@ -930,14 +936,14 @@ Una conciliación **Rechazada** vuelve al operador bancario para corrección.
 
 > **Este paso no es opcional si la institución emite estado de flujo de efectivo.** Es su única fuente: el reporte compara el *Saldo Final* entre períodos. Sin el estado del mes importado, el flujo de efectivo sale vacío o incompleto.
 
-#### Paso 11 — Reportes financieros (Contador general)
+#### Paso 11 — Reportes financieros (Contador)
 
 1. Menú → **Reportes**.
 2. Genere los estados del período: flujo de efectivo, balanza anual, cambio en el patrimonio, situación comparativo y resultado comparativo.
 3. Descargue y archive según la política documental de la institución.
-4. El **flujo de efectivo** se exporta a Excel con el **formato oficial** de la institución, a partir de la plantilla incluida en el sistema.
+4. El **flujo de efectivo** y el **estado de cambio en el patrimonio** se exportan a Excel con el **formato oficial** de la institución, a partir de las plantillas incluidas en el sistema.
 
-#### Pasos 12 y 13 — Cierre (Administrador)
+#### Pasos 12 y 13 — Cierre (Contador)
 
 1. En **Cierre contable**, ubique el período. Si no está en la lista, ábralo con **Abrir período** (formato AAAA-MM).
 2. Presione **Marcar en revisión**. Esto señala que el mes está en proceso de cierre; todavía admite cambios.

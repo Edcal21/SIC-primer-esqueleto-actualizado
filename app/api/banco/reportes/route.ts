@@ -1,11 +1,12 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, reportesBancarios } from "../../../../db/schema";
+import { archivosImportados, conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, reportesBancarios } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
 import { construirLineasConMoneda, leerEstadoBancario, resumenEstadoBancario, type LineaEstadoBancario } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { verificarRateLimit } from "../../../../lib/security";
 import { verificarPeriodosAbiertos } from "../../../../lib/periodos";
+import { prepararEvidenciaArchivo, registrarArchivoImportado } from "../../../../lib/importaciones";
 
 const serializar = (row: typeof reportesBancarios.$inferSelect) => ({
   id: row.id,
@@ -22,6 +23,7 @@ const serializar = (row: typeof reportesBancarios.$inferSelect) => ({
   totalDebitos: row.totalDebitos,
   totalCreditos: row.totalCreditos,
   mensajeError: row.mensajeError,
+  archivoImportadoId: row.archivoImportadoId,
 });
 
 export async function GET(request: Request) {
@@ -32,10 +34,16 @@ export async function GET(request: Request) {
   try {
     const rows = await db.select().from(reportesBancarios).orderBy(desc(reportesBancarios.creadoEn)).limit(50);
     const conciliaciones = await db.select({ id: conciliacionesBancarias.id, reporteId: conciliacionesBancarias.reporteId, estado: conciliacionesBancarias.estado }).from(conciliacionesBancarias);
+    const idsArchivos = rows.map(row => row.archivoImportadoId).filter((id): id is string => Boolean(id));
+    const evidencias = idsArchivos.length ? await db.select({ id: archivosImportados.id, version: archivosImportados.version, hashSha256: archivosImportados.archivoHashSha256 })
+      .from(archivosImportados).where(inArray(archivosImportados.id, idsArchivos)) : [];
     const porReporte = new Map(conciliaciones.map(item => [item.reporteId, item]));
+    const porArchivo = new Map(evidencias.map(item => [item.id, item]));
     return Response.json({
       reportes: rows.map(row => ({
         ...serializar(row),
+        version: row.archivoImportadoId ? porArchivo.get(row.archivoImportadoId)?.version ?? null : null,
+        hashSha256: row.archivoImportadoId ? porArchivo.get(row.archivoImportadoId)?.hashSha256 ?? null : null,
         conciliacionId: porReporte.get(row.id)?.id ?? null,
         conciliacionEstado: porReporte.get(row.id)?.estado ?? null,
       })),
@@ -70,30 +78,38 @@ export async function POST(request: Request) {
     .limit(1);
   if (!cuenta) return jsonError("La cuenta bancaria seleccionada no existe o está inactiva", 400);
 
+  const evidencia = await prepararEvidenciaArchivo(archivo);
   let lineas: LineaEstadoBancario[];
   try {
     lineas = await leerEstadoBancario(archivo);
   } catch (error) {
     const mensaje = error instanceof Error ? error.message : "No se pudo leer el estado bancario";
     try {
-      const [reporte] = await db.insert(reportesBancarios).values({
-        nombre: archivo.name,
-        fecha: new Date().toISOString().slice(0, 10),
-        estado: "error",
-        archivoTamano: archivo.size,
-        cargadoPor: user.id,
-        cargadoPorNombre: user.nombre,
-        cuentaBancariaNumero: cuenta.numeroCuenta,
-        mensajeError: mensaje,
-      }).returning();
-      await registrarAuditoria(db, {
-        user,
-        modulo: "Bancos",
-        accion: "Rechazó reporte bancario ilegible",
-        entidad: "reportes_bancarios",
-        entidadId: reporte.id,
-        resultado: "error",
-        detalle: `${archivo.name} · ${mensaje}`,
+      await db.transaction(async tx => {
+        const archivoImportado = await registrarArchivoImportado(tx, {
+          evidencia, tipo: "estado_bancario", user, cuentaBancariaNumero: cuenta.numeroCuenta,
+          cantidadRegistros: 0, estado: "error", mensajeError: mensaje,
+        });
+        const [reporte] = await tx.insert(reportesBancarios).values({
+          nombre: archivo.name,
+          fecha: new Date().toISOString().slice(0, 10),
+          estado: "error",
+          archivoTamano: archivo.size,
+          cargadoPor: user.id,
+          cargadoPorNombre: user.nombre,
+          cuentaBancariaNumero: cuenta.numeroCuenta,
+          mensajeError: mensaje,
+          archivoImportadoId: archivoImportado.id,
+        }).returning();
+        await registrarAuditoria(tx, {
+          user,
+          modulo: "Bancos",
+          accion: "Rechazó reporte bancario ilegible",
+          entidad: "reportes_bancarios",
+          entidadId: reporte.id,
+          resultado: "error",
+          detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${mensaje}`,
+        });
       });
     } catch (registroFallido) {
       console.error("Bank report error logging failed", registroFallido);
@@ -113,6 +129,19 @@ export async function POST(request: Request) {
 
   try {
     const reporte = await db.transaction(async tx => {
+      const periodo = resumen.periodoInicio?.slice(0, 7) === resumen.periodoFin?.slice(0, 7)
+        ? resumen.periodoInicio?.slice(0, 7) ?? null
+        : `${resumen.periodoInicio}/${resumen.periodoFin}`;
+      const archivoImportado = await registrarArchivoImportado(tx, {
+        evidencia, tipo: "estado_bancario", user, cuentaBancariaNumero: cuenta.numeroCuenta, periodo,
+        cantidadRegistros: resumen.totalLineas,
+        totalesControl: {
+          totalDebitos: resumen.totalDebitos,
+          totalCreditos: resumen.totalCreditos,
+          neto: (Number(resumen.totalCreditos) - Number(resumen.totalDebitos)).toFixed(2),
+          pendientesDeTasa,
+        },
+      });
       const [creado] = await tx.insert(reportesBancarios).values({
         nombre: archivo.name,
         fecha: new Date().toISOString().slice(0, 10),
@@ -126,6 +155,7 @@ export async function POST(request: Request) {
         totalLineas: resumen.totalLineas,
         totalDebitos: resumen.totalDebitos,
         totalCreditos: resumen.totalCreditos,
+        archivoImportadoId: archivoImportado.id,
       }).returning();
 
       await tx.insert(lineasReporteBancario).values(lineasConMoneda.map(linea => ({ ...linea, reporteId: creado.id })));
@@ -135,15 +165,15 @@ export async function POST(request: Request) {
         accion: "Procesó reporte bancario",
         entidad: "reportes_bancarios",
         entidadId: creado.id,
-        detalle: `${archivo.name} · ${cuenta.nombre} · ${resumen.totalLineas} líneas · débitos ${resumen.totalDebitos} · créditos ${resumen.totalCreditos}`
+        detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${cuenta.nombre} · ${resumen.totalLineas} líneas · débitos ${resumen.totalDebitos} · créditos ${resumen.totalCreditos}`
           + (pendientesDeTasa ? ` · ${pendientesDeTasa} líneas pendientes de tasa USD` : ""),
       });
 
-      return creado;
+      return { creado, archivoImportado };
     });
 
     return Response.json({
-      reporte: { ...serializar(reporte), conciliacionId: null, conciliacionEstado: null },
+      reporte: { ...serializar(reporte.creado), version: reporte.archivoImportado.version, hashSha256: reporte.archivoImportado.archivoHashSha256, conciliacionId: null, conciliacionEstado: null },
       pendientesDeTasa,
     }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

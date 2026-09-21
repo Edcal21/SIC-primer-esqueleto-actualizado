@@ -6,22 +6,25 @@ import { rolesPermisos, usuarios as usuariosTable } from "../db/schema";
 import { jsonSeguro } from "./security";
 
 export type RolId = "administrador" | "contador_general" | "operador_bancario" | "auditor_general";
-export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
+export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:ver" | "conciliacion:gestionar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
 
-export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[] };
+export type UsuarioSesion = { id: string; usuario: string; nombre: string; rol: RolId; permisos: Permiso[]; debeCambiarPassword?: boolean };
 type UsuarioInterno = UsuarioSesion & { salt: string; passwordHash: string };
 
+// Refleja la redistribución de permisos de drizzle/0029_roles_contador_finanzas.sql: Contador
+// (antes "contador_general") absorbe casi todo lo que tenía Administrador más conciliación e
+// importaciones; Finanzas (antes "operador_bancario") queda acotado a minutas y carga bancaria.
 const permisosPorRol: Record<RolId, Permiso[]> = {
   administrador: ["panel:ver", "usuarios:administrar", "roles:administrar", "catalogo:administrar", "iglesias:administrar", "auditoria:ver", "configuracion:administrar", "banco:ver", "conciliacion:aprobar"],
-  contador_general: ["panel:ver", "importaciones:administrar", "reportes:ver", "reportes:descargar"],
-  operador_bancario: ["panel:ver", "movimientos:escribir", "banco:ver", "banco:cargar", "reportes:ver"],
-  auditor_general: ["panel:ver", "banco:ver", "reportes:ver", "reportes:descargar", "auditoria:ver"],
+  contador_general: ["panel:ver", "usuarios:administrar", "roles:administrar", "catalogo:administrar", "iglesias:administrar", "banco:ver", "conciliacion:ver", "conciliacion:gestionar", "conciliacion:aprobar", "importaciones:administrar", "reportes:ver", "reportes:descargar", "auditoria:ver", "configuracion:administrar"],
+  operador_bancario: ["panel:ver", "movimientos:escribir", "banco:ver", "banco:cargar"],
+  auditor_general: ["panel:ver", "banco:ver", "conciliacion:ver", "reportes:ver", "reportes:descargar", "auditoria:ver"],
 };
 
 const usuariosLocales: UsuarioInterno[] = [
   { id: "usr-admin", usuario: "administrador", nombre: "Administrador del Sistema", rol: "administrador", permisos: permisosPorRol.administrador, salt: "4836377235e90964097682ebfda61e05", passwordHash: "d913ff8d9bf0ca9a71ce0d5625886395f1f32922d52ae740513f870ae5227ddd" },
-  { id: "usr-contador", usuario: "contador", nombre: "Contador General", rol: "contador_general", permisos: permisosPorRol.contador_general, salt: "b04259fa5a05cd95fda1a4af06b926d8", passwordHash: "a84233f4147da5048daef1e3d0d875df1d9ad96a9b77b35c399001793f9b5253" },
-  { id: "usr-banco", usuario: "banco", nombre: "Operador Bancario", rol: "operador_bancario", permisos: permisosPorRol.operador_bancario, salt: "cd15b6c7a108464a98ed72733da083aa", passwordHash: "07ec8bed948731f1ccb8d4f5e49ac38ed62eab2f213cbb120950d2f9233525cc" },
+  { id: "usr-contador", usuario: "contador", nombre: "Contador", rol: "contador_general", permisos: permisosPorRol.contador_general, salt: "b04259fa5a05cd95fda1a4af06b926d8", passwordHash: "a84233f4147da5048daef1e3d0d875df1d9ad96a9b77b35c399001793f9b5253" },
+  { id: "usr-banco", usuario: "banco", nombre: "Finanzas", rol: "operador_bancario", permisos: permisosPorRol.operador_bancario, salt: "cd15b6c7a108464a98ed72733da083aa", passwordHash: "07ec8bed948731f1ccb8d4f5e49ac38ed62eab2f213cbb120950d2f9233525cc" },
   { id: "usr-auditor", usuario: "auditor", nombre: "Auditor General", rol: "auditor_general", permisos: permisosPorRol.auditor_general, salt: "1ae524d779667e6470265d096ab2efec", passwordHash: "563dff2b46b224cec7a76817f514431c2167f0a7c05ca16db989ba01013670ba" },
 ];
 
@@ -72,13 +75,18 @@ async function usuarioDesdeDbPorUsuario(usuario: string): Promise<UsuarioInterno
   const db = getDb();
   const [found] = await db.select().from(usuariosTable).where(eq(usuariosTable.usuario, usuario.trim().toLowerCase())).limit(1);
   if (!found || found.estado !== "activo") return null;
-  const permisos = await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, found.rolId));
+  // Con la contraseña pendiente de rotación, el usuario se autentica pero no recibe ningún
+  // permiso hasta completar el cambio: es lo que fuerza la pantalla bloqueante, no solo la UI.
+  const permisos = found.debeCambiarPassword
+    ? []
+    : (await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, found.rolId))).map(item => item.permisoId as Permiso);
   return {
     id: found.id,
     usuario: found.usuario,
     nombre: found.nombre,
     rol: found.rolId as RolId,
-    permisos: permisos.map(item => item.permisoId as Permiso),
+    permisos,
+    debeCambiarPassword: found.debeCambiarPassword,
     salt: found.salt,
     passwordHash: found.passwordHash,
   };
@@ -88,13 +96,16 @@ async function usuarioDesdeDbPorId(id: string): Promise<UsuarioSesion | null> {
   const db = getDb();
   const [found] = await db.select().from(usuariosTable).where(eq(usuariosTable.id, id)).limit(1);
   if (!found || found.estado !== "activo") return null;
-  const permisos = await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, found.rolId));
+  const permisos = found.debeCambiarPassword
+    ? []
+    : (await db.select({ permisoId: rolesPermisos.permisoId }).from(rolesPermisos).where(eq(rolesPermisos.rolId, found.rolId))).map(item => item.permisoId as Permiso);
   return {
     id: found.id,
     usuario: found.usuario,
     nombre: found.nombre,
     rol: found.rolId as RolId,
-    permisos: permisos.map(item => item.permisoId as Permiso),
+    permisos,
+    debeCambiarPassword: found.debeCambiarPassword,
   };
 }
 

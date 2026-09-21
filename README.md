@@ -60,9 +60,11 @@ Los usuarios locales están definidos en `lib/auth.ts`:
 | Usuario | Contraseña | Rol | Acceso |
 | --- | --- | --- | --- |
 | `administrador` | `Admin2026!` | Administrador | Administración de usuarios, roles y auditoría. |
-| `contador` | `Conta2026!` | Contador general | Movimientos, catálogo, bancos, importaciones y reportes. |
-| `banco` | `Banco2026!` | Operador bancario | Consulta y carga de archivos bancarios. |
-| `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, reportes y auditoría. |
+| `contador` | `Conta2026!` | Contador | Usuarios, roles, catálogo, conciliación, importaciones y reportes. |
+| `banco` | `Banco2026!` | Finanzas | Minutas y carga de archivos bancarios. |
+| `auditor` | `Audit2026!` | Auditor general | Consulta de bancos, conciliación, reportes y auditoría. |
+
+En la base de datos real, la migración `0029_roles_contador_finanzas` renombra los roles `contador_general`→"Contador" y `operador_bancario`→"Finanzas", redistribuye permisos de conciliación, y desactiva el usuario `administrador` genérico (el rol Contador absorbe sus permisos). Los usuarios `usr-contador`, `usr-banco` y `usr-auditor` quedan con `debe_cambiar_password=true` tras esa migración: deben cambiar su contraseña en el primer ingreso antes de tener cualquier permiso (ver `0030_password_rotation_production`).
 
 Estas credenciales son exclusivamente de desarrollo. La migración `0002_security_users_roles` crea las tablas `roles`, `permisos`, `roles_permisos` y `usuarios`, y carga usuarios iniciales con hashes existentes. La aplicación exige PostgreSQL para autenticar; el fallback local de `lib/auth.ts` solo se activa si define `SIC_ALLOW_LOCAL_AUTH_FALLBACK=true`.
 

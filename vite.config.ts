@@ -8,9 +8,11 @@ import { sites } from "./build/sites-vite-plugin";
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const serveOnLan = process.env.SIC_LAN === "true";
 
+// compatibility_date/compatibility_flags ya no van aquí: los declara wrangler.jsonc, y el plugin
+// de Cloudflare los fusiona con esta config; repetirlos aquí duplica "nodejs_compat" y el Workers
+// runtime rechaza el flag repetido al iniciar (ver commit que agregó wrangler.jsonc).
 const localBindingConfig = {
   main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
   d1_databases: [],
   r2_buckets: [],
 };

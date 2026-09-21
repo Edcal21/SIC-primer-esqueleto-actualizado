@@ -25,6 +25,35 @@ function ModuleLoading() {
   return <div className="reportLoadingOverlay moduleLoading" role="status" aria-live="polite"><span className="spinner" aria-hidden="true"/><span className="loadingText">CARGANDO MÓDULO</span></div>;
 }
 
+function PasswordChangeRequired({ user, config, onChanged, logout }: { user: User; config: ConfiguracionSistema; onChanged: () => Promise<void>; logout: () => Promise<void> }) {
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const nueva = String(form.get("nueva") ?? "");
+    const confirmar = String(form.get("confirmar") ?? "");
+    if (nueva !== confirmar) {
+      setSaving(false);
+      return setError("La confirmaci\u00f3n no coincide con la nueva contrase\u00f1a");
+    }
+    const response = await fetch("/api/auth/password", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actual: form.get("actual"), nueva }),
+    });
+    const result = await response.json();
+    setSaving(false);
+    if (!response.ok) return setError(result.error ?? "No se pudo cambiar la contrase\u00f1a");
+    await onChanged();
+  }
+
+  return <main className="authScreen"><section className="authCard"><div className="authBrand institutional"><span className="authLogo" style={{ backgroundImage: `url(${config.logoLogin})` }} role="img" aria-label={config.institucionNombre}/><div><b>{config.sistemaNombre}</b><small>{config.institucionNombre}</small></div></div><span className="eyebrow">ACCESO SEGURO</span><h1>Cambiar contrase\u00f1a</h1><p>{user.nombre}, debe establecer una contrase\u00f1a nueva antes de continuar.</p><form onSubmit={submit}><label>Contrase\u00f1a actual<input name="actual" type="password" autoComplete="current-password" required placeholder="Contrase\u00f1a actual"/></label><label>Nueva contrase\u00f1a<input name="nueva" type="password" autoComplete="new-password" required minLength={12} placeholder="M\u00ednimo 12 caracteres"/></label><label>Confirmar nueva contrase\u00f1a<input name="confirmar" type="password" autoComplete="new-password" required minLength={12} placeholder="Repita la nueva contrase\u00f1a"/></label>{error ? <div className="authError" role="alert">{error}</div> : null}<button className="primary" type="submit" disabled={saving}>{saving ? "Guardando..." : "Cambiar contrase\u00f1a"}</button><button className="linkButton" type="button" onClick={logout}>Cerrar sesi\u00f3n</button></form></section></main>;
+}
+
 const moduleSlug = (name: string) => name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const moduleFromHash = (allowedNames: string[]) => {
   if (typeof window === "undefined") return null;
@@ -61,6 +90,14 @@ export default function Home() {
   };
   const requestConfirmation: RequestConfirmation = nextModal => setModal(nextModal);
 
+  async function refreshSession() {
+    const response = await fetch("/api/auth/me");
+    if (!response.ok) { setUser(null); return; }
+    const currentUser = (await response.json()).user as User;
+    setUser(currentUser);
+    setActiveModule(moduleFromHash(allowedNamesForUser(currentUser)) ?? defaultModuleForUser(currentUser));
+  }
+
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError("");
     const form = new FormData(event.currentTarget);
@@ -92,7 +129,7 @@ export default function Home() {
       case "Catálogo contable": return <CatalogoContable notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Iglesias": return <IglesiasAdmin notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Bancos": return <Bancos canUpload={can("banco:cargar")} canManageAccounts={can("catalogo:administrar")} notify={notify} requestConfirmation={requestConfirmation}/>;
-      case "Conciliación": return <ConciliacionBancaria canReconcile={can("banco:cargar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/>;
+      case "Conciliación": return <ConciliacionBancaria canReconcile={can("conciliacion:gestionar")} canApprove={can("conciliacion:aprobar")} notify={notify} requestConfirmation={requestConfirmation}/>;
       case "Importaciones": return <Importaciones notify={notify}/>;
       case "Reportes": return <Reportes canDownload={can("reportes:descargar")}/>;
       case "Auditoría": return <Auditoria/>;
@@ -104,6 +141,7 @@ export default function Home() {
 
   if (checking) return <main className="authScreen"><div className="authCard"><b>Validando sesión…</b></div></main>;
   if (!user) return <Login onSubmit={login} error={error} config={config}/>;
+  if (user.debeCambiarPassword) return <PasswordChangeRequired user={user} config={config} onChanged={refreshSession} logout={logout}/>;
   const allowedMenu = menu.filter(item => can(item.permiso));
 
   return <main className="shell">

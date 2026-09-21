@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { cuentasContables, importacionesBalanza, lineasBalanza } from "../../../../db/schema";
 import { registrarAuditoria } from "../../../../lib/auditoria";
@@ -6,17 +6,12 @@ import { jsonError, puede, usuarioDesdeRequest } from "../../../../lib/auth";
 import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../../lib/periodos";
 import { verificarRateLimit } from "../../../../lib/security";
 import { leerBalanza, type BalanzaProcesada } from "../../../../lib/balanza";
+import { prepararEvidenciaArchivo, registrarArchivoImportado } from "../../../../lib/importaciones";
 
 const periodoRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function valorTexto(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function inferirCuenta(codigo: string) {
-  const naturaleza = codigo.startsWith("2") || codigo.startsWith("3") || codigo.startsWith("4") ? "acreedora" : "deudora";
-  const clasificacionFlujo = codigo.startsWith("1") || codigo.startsWith("4") || codigo.startsWith("5") ? "operación" : "no aplica";
-  return { naturaleza: naturaleza as "deudora" | "acreedora", clasificacionFlujo: clasificacionFlujo as "operación" | "no aplica" };
 }
 
 export async function GET(request: Request) {
@@ -57,19 +52,48 @@ export async function POST(request: Request) {
   const periodoCerrado = await primerPeriodoCerrado(db, [periodo]);
   if (periodoCerrado) return jsonError(mensajePeriodoCerrado(periodoCerrado), 409);
 
+  const evidencia = await prepararEvidenciaArchivo(archivo);
   let balanza: BalanzaProcesada;
   try {
-    balanza = leerBalanza(await archivo.arrayBuffer());
+    balanza = leerBalanza(evidencia.arrayBuffer);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "No se pudo leer la balanza", 400);
+    const mensaje = error instanceof Error ? error.message : "No se pudo leer la balanza";
+    await db.transaction(tx => registrarArchivoImportado(tx, { evidencia, tipo: "balanza", user, periodo, cantidadRegistros: 0, estado: "error", mensajeError: mensaje }));
+    return jsonError(mensaje, 400);
   }
 
   const { filas, totalDebe, totalHaber } = balanza;
+  // El catálogo contable es la fuente de verdad de qué cuentas existen: la balanza ya no crea
+  // cuentas automáticamente al importar (un código mal digitado creaba silenciosamente una cuenta
+  // fantasma en vez de fallar). Si una cuenta no existe, está inactiva o es de mayor/título, se
+  // rechaza la importación completa y se pide corregir el catálogo primero.
+  const codigosCuentas = [...new Set(filas.map(fila => fila.cuentaCodigo.trim()).filter(Boolean))];
+  if (codigosCuentas.length) {
+    const cuentas = await db.select({
+      codigo: cuentasContables.codigo,
+      estado: cuentasContables.estado,
+      esCuentaMovimiento: cuentasContables.esCuentaMovimiento,
+    }).from(cuentasContables).where(inArray(cuentasContables.codigo, codigosCuentas));
+    const mapaCuentas = new Map(cuentas.map(cuenta => [cuenta.codigo, cuenta]));
+    const erroresCatalogo = filas.flatMap((fila, index) => {
+      const cuenta = mapaCuentas.get(fila.cuentaCodigo.trim());
+      if (!cuenta) return [`Línea ${index + 1}: la cuenta ${fila.cuentaCodigo} no existe en el catálogo contable`];
+      if (cuenta.estado !== "activa") return [`Línea ${index + 1}: la cuenta ${fila.cuentaCodigo} está inactiva`];
+      if (!cuenta.esCuentaMovimiento) return [`Línea ${index + 1}: la cuenta ${fila.cuentaCodigo} es de mayor/título; la balanza solo admite cuentas de movimiento`];
+      return [];
+    });
+    if (erroresCatalogo.length) return jsonError(`Catálogo contable inválido para la balanza. ${erroresCatalogo.slice(0, 5).join(" · ")}`, 400);
+  }
+
   const diferencia = totalDebe - totalHaber;
   const estado = Math.abs(diferencia) < 0.01 ? "procesado" : "con_diferencias";
 
   try {
     const result = await db.transaction(async tx => {
+      const archivoImportado = await registrarArchivoImportado(tx, {
+        evidencia, tipo: "balanza", user, periodo, cantidadRegistros: filas.length,
+        totalesControl: { totalDebe: totalDebe.toFixed(2), totalHaber: totalHaber.toFixed(2), diferencia: diferencia.toFixed(2) },
+      });
       const [importacion] = await tx.insert(importacionesBalanza).values({
         archivoNombre: archivo.name,
         archivoTamano: archivo.size,
@@ -79,42 +103,22 @@ export async function POST(request: Request) {
         totalDebe: totalDebe.toFixed(2),
         totalHaber: totalHaber.toFixed(2),
         importadoPor: user.id,
+        archivoImportadoId: archivoImportado.id,
       }).returning();
 
       const lineas = await tx.insert(lineasBalanza).values(
         filas.map(fila => ({ ...fila, importacionId: importacion.id })),
       ).returning();
-      for (const fila of filas) {
-        if (!/^\d{8}$/.test(fila.cuentaCodigo)) continue;
-        const cuenta = inferirCuenta(fila.cuentaCodigo);
-        await tx.insert(cuentasContables).values({
-          codigo: fila.cuentaCodigo,
-          descripcion: fila.cuentaNombre,
-          nivel: 5,
-          esCuentaMovimiento: true,
-          naturaleza: cuenta.naturaleza,
-          clasificacionFlujo: cuenta.clasificacionFlujo,
-        }).onConflictDoUpdate({
-          target: cuentasContables.codigo,
-          set: {
-            descripcion: fila.cuentaNombre,
-            esCuentaMovimiento: true,
-            estado: "activa",
-            naturaleza: cuenta.naturaleza,
-            clasificacionFlujo: cuenta.clasificacionFlujo,
-          },
-        });
-      }
       await registrarAuditoria(tx, {
         user,
         modulo: "Importaciones",
         accion: "Importó balanza de comprobación",
         entidad: "importaciones_balanza",
         entidadId: importacion.id,
-        detalle: `${archivo.name} · ${periodo} · ${filas.length} líneas · diferencia ${diferencia.toFixed(2)}`,
+        detalle: `${archivo.name} · versión ${archivoImportado.version} · SHA-256 ${archivoImportado.archivoHashSha256.slice(0, 12)}… · ${periodo} · ${filas.length} líneas · diferencia ${diferencia.toFixed(2)}`,
       });
 
-      return { importacion, lineas };
+      return { importacion, lineas, archivoImportado: { id: archivoImportado.id, version: archivoImportado.version, hashSha256: archivoImportado.archivoHashSha256 } };
     });
 
     return Response.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });

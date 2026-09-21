@@ -1,13 +1,14 @@
 import { conBloqueoConciliacion, esConflictoContable } from "../../../../lib/conciliacion-lock";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
+import { archivosImportados, conciliacionesArchivosImportados, conciliacionesBancarias, cuentasBancarias, lineasReporteBancario, movimientosCuentas, reportesBancarios } from "../../../../db/schema";
 import { registrarAdvertenciaSegregacionConciliacion, registrarAuditoria } from "../../../../lib/auditoria";
 import { estaPendienteDeTasa, mismoMonto, movimientosConciliables, recalcularConciliacion } from "../../../../lib/banco";
 import { jsonError, puede, usuarioDesdeRequest, type UsuarioSesion } from "../../../../lib/auth";
 import { primerPeriodoCerrado, mensajePeriodoCerrado } from "../../../../lib/periodos";
+import { sincronizarArchivosConciliacion } from "../../../../lib/importaciones";
 
-type AccionConciliacion = "conciliar" | "descartar" | "reabrir" | "aprobar" | "rechazar";
+type AccionConciliacion = "conciliar" | "descartar" | "reabrir" | "aprobar" | "rechazar" | "reabrir_conciliacion";
 type ConciliacionUpdatePayload = {
   accion?: AccionConciliacion;
   lineaId?: string;
@@ -15,7 +16,7 @@ type ConciliacionUpdatePayload = {
   observaciones?: string;
 };
 
-const acciones = new Set<AccionConciliacion>(["conciliar", "descartar", "reabrir", "aprobar", "rechazar"]);
+const acciones = new Set<AccionConciliacion>(["conciliar", "descartar", "reabrir", "aprobar", "rechazar", "reabrir_conciliacion"]);
 
 async function cargarConciliacion(db: ReturnType<typeof getDb>, id: string) {
   const [conciliacion] = await db.select().from(conciliacionesBancarias).where(eq(conciliacionesBancarias.id, id)).limit(1);
@@ -26,10 +27,28 @@ async function detalle(db: ReturnType<typeof getDb>, id: string) {
   const conciliacion = await cargarConciliacion(db, id);
   if (!conciliacion) return null;
 
-  const [[reporte], [cuenta], lineas] = await Promise.all([
+  const [[reporte], [cuenta], lineas, archivos] = await Promise.all([
     db.select().from(reportesBancarios).where(eq(reportesBancarios.id, conciliacion.reporteId)).limit(1),
     db.select().from(cuentasBancarias).where(eq(cuentasBancarias.numeroCuenta, conciliacion.cuentaBancariaNumero)).limit(1),
     db.select().from(lineasReporteBancario).where(eq(lineasReporteBancario.reporteId, conciliacion.reporteId)).orderBy(asc(lineasReporteBancario.numeroLinea)),
+    db.select({
+      id: archivosImportados.id,
+      rol: conciliacionesArchivosImportados.rol,
+      tipo: archivosImportados.tipo,
+      archivoNombre: archivosImportados.archivoNombre,
+      archivoTamano: archivosImportados.archivoTamano,
+      archivoHashSha256: archivosImportados.archivoHashSha256,
+      cuentaBancariaNumero: archivosImportados.cuentaBancariaNumero,
+      periodo: archivosImportados.periodo,
+      version: archivosImportados.version,
+      cantidadRegistros: archivosImportados.cantidadRegistros,
+      totalesControl: archivosImportados.totalesControl,
+      importadoPorNombre: archivosImportados.importadoPorNombre,
+      creadoEn: archivosImportados.creadoEn,
+    }).from(conciliacionesArchivosImportados)
+      .innerJoin(archivosImportados, eq(archivosImportados.id, conciliacionesArchivosImportados.archivoImportadoId))
+      .where(eq(conciliacionesArchivosImportados.conciliacionId, id))
+      .orderBy(asc(conciliacionesArchivosImportados.rol), asc(archivosImportados.version)),
   ]);
 
   const fechas = lineas.map(linea => linea.fecha).filter((fecha): fecha is string => Boolean(fecha)).sort();
@@ -48,13 +67,14 @@ async function detalle(db: ReturnType<typeof getDb>, id: string) {
       movimiento: linea.movimientoId ? movimientoPorId.get(linea.movimientoId) ?? null : null,
     })),
     movimientos,
+    archivos,
   };
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
-  if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
+  if (!puede(user, "conciliacion:ver")) return jsonError("Permiso insuficiente", 403);
 
   const { id } = await params;
   const db = getDb();
@@ -75,7 +95,7 @@ async function actualizarLinea(
   accion: Extract<AccionConciliacion, "conciliar" | "descartar" | "reabrir">,
   body: ConciliacionUpdatePayload,
 ) {
-  if (!puede(user, "banco:cargar")) return jsonError("No tiene permiso para modificar líneas de conciliación", 403);
+  if (!puede(user, "conciliacion:gestionar")) return jsonError("No tiene permiso para modificar líneas de conciliación", 403);
   if (conciliacion.estado !== "borrador") return jsonError("La conciliación ya fue revisada y no admite cambios", 409);
 
   const periodoCerradoLinea = await primerPeriodoCerrado(db, [conciliacion.periodo]);
@@ -126,6 +146,7 @@ async function actualizarLinea(
   }
 
   const actualizada = await recalcularConciliacion(db, conciliacion.id);
+  await sincronizarArchivosConciliacion(db, conciliacion.id);
   const etiquetas = { conciliar: "Enlazó línea bancaria con movimiento", descartar: "Descartó línea bancaria", reabrir: "Reabrió línea bancaria" };
   await registrarAuditoria(db, {
     user,
@@ -164,6 +185,7 @@ async function revisar(
   if (accion === "aprobar" && actual && actual.lineasPendientes > 0) {
     return jsonError(`No se puede aprobar: quedan ${actual.lineasPendientes} líneas bancarias sin conciliar ni descartar`, 400);
   }
+  await sincronizarArchivosConciliacion(db, conciliacion.id);
 
   const [lineaGestionadaPorRevisor] = accion === "aprobar"
     ? await db.select({ id: lineasReporteBancario.id }).from(lineasReporteBancario)
@@ -202,10 +224,53 @@ async function revisar(
   return Response.json({ conciliacion: revisada }, { headers: { "Cache-Control": "no-store" } });
 }
 
+async function reabrirConciliacion(
+  db: ReturnType<typeof getDb>,
+  user: UsuarioSesion,
+  conciliacion: typeof conciliacionesBancarias.$inferSelect,
+  body: ConciliacionUpdatePayload,
+) {
+  if (!puede(user, "conciliacion:aprobar")) return jsonError("No tiene permiso para reabrir conciliaciones", 403);
+  if (conciliacion.estado !== "rechazada") return jsonError("Solo se puede reabrir una conciliación rechazada", 409);
+
+  const motivo = body.observaciones?.trim();
+  if (!motivo || motivo.length < 10) return jsonError("Indique un motivo de reapertura de al menos 10 caracteres", 400);
+
+  const periodoCerrado = await primerPeriodoCerrado(db, [conciliacion.periodo]);
+  if (periodoCerrado) return jsonError(mensajePeriodoCerrado(periodoCerrado), 409);
+
+  const detalleAnterior = [
+    `Motivo reapertura: ${motivo}`,
+    conciliacion.revisadoPorNombre ? `Rechazó: ${conciliacion.revisadoPorNombre}` : null,
+    conciliacion.revisadoEn ? `Fecha rechazo: ${conciliacion.revisadoEn.toISOString()}` : null,
+    conciliacion.observaciones ? `Motivo rechazo: ${conciliacion.observaciones}` : null,
+  ].filter(Boolean).join(" · ");
+
+  const [reabierta] = await db.update(conciliacionesBancarias).set({
+    estado: "borrador",
+    observaciones: null,
+    revisadoPor: null,
+    revisadoPorNombre: null,
+    revisadoEn: null,
+  }).where(eq(conciliacionesBancarias.id, conciliacion.id)).returning();
+  await sincronizarArchivosConciliacion(db, conciliacion.id);
+
+  await registrarAuditoria(db, {
+    user,
+    modulo: "Conciliación",
+    accion: "Reabrió conciliación rechazada",
+    entidad: "conciliaciones_bancarias",
+    entidadId: conciliacion.id,
+    detalle: detalleAnterior,
+  });
+
+  return Response.json({ conciliacion: reabierta }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await usuarioDesdeRequest(request);
   if (!user) return jsonError("No autenticado", 401);
-  if (!puede(user, "banco:ver")) return jsonError("Permiso insuficiente", 403);
+  if (!puede(user, "conciliacion:ver")) return jsonError("Permiso insuficiente", 403);
 
   const { id } = await params;
   let body: ConciliacionUpdatePayload;
@@ -219,6 +284,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return await conBloqueoConciliacion(db, async db => {
       const conciliacion = await cargarConciliacion(db, id);
       if (!conciliacion) return jsonError("Conciliación no encontrada", 404);
+      if (accion === "reabrir_conciliacion") return await reabrirConciliacion(db, user, conciliacion, body);
       if (accion === "aprobar" || accion === "rechazar") return await revisar(db, user, conciliacion, accion, body);
       return await actualizarLinea(db, user, conciliacion, accion, body);
     });

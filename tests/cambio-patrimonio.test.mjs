@@ -1,203 +1,154 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { reporteCambioPatrimonioDesdeBalanza } from "../lib/reportes.ts";
+import { reporteCambioPatrimonioDesdeSituaciones } from "../lib/reportes.ts";
 
 /**
- * Datos sintéticos con la misma estructura que la balanza de comprobación real de la institución:
- * cinco cuentas de patrimonio por código real (31010000, 31020000, 33010100, 33010200, 33010300),
- * más cuentas de ingreso (4xxxxxxx) y gasto (5xxxxxxx) para derivar la utilidad del ejercicio. Las
- * cifras no son reales.
+ * El Estado de Cambio en el Patrimonio se construye a partir de dos cierres del Estado de
+ * Situación Financiera (no de la balanza de comprobación): el formato oficial es una matriz de 6
+ * columnas (Patrimonio, Patrimonio donado, Utilidades acumuladas, Revaluación, Utilidad del
+ * ejercicio, Total) en 5 filas (apertura, traslado, impuesto, resultado, totales). Las cifras son
+ * sintéticas.
  */
-const balanza = (periodo, cuentas) => ({
+const situacion = (periodo, filas) => ({
   periodo,
-  filas: cuentas.map(([codigo, concepto, saldo]) => ({ codigo, concepto, debe: 0, haber: 0, saldo })),
+  filas: filas.map(([concepto, saldoFinal, esTotal = false]) => ({ concepto, saldoFinal, esTotal })),
 });
 
-const linea = (reporte, concepto) => reporte.filas.find(fila => fila.concepto === concepto)?.actual;
+const fila = (reporte, concepto) => reporte.filas.find(item => item.concepto.startsWith(concepto));
 
-test("el traslado esperado coincide con la variación real cuando no hay ajustes adicionales", () => {
-  // Año anterior: utilidad del ejercicio de -5,000 (una pérdida).
-  const anterior = balanza("2024-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", -500],
-    ["33010200", "Utilidades Acumuladas", -20000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 8000],
-    ["40010000", "Ingresos", 50000],
-    ["50010000", "Gastos Operativos", 55000],
+test("un ECP consistente concilia exacto contra el cierre del Estado de Situación Financiera", () => {
+  // Año anterior: patrimonio 100000, donado 10000, acumuladas -20000, revaluación 8000, y una
+  // utilidad del ejercicio de 5000 (excedentes). Sin pago de IR (no hay línea PAGO MINIMO DEFINITIVO).
+  const anterior = situacion("2024-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -20000],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 5000],
   ]);
-  // Año actual: Utilidades Acumuladas bajó exactamente en 5,000 — el traslado de la pérdida
-  // anterior, sin ningún ajuste adicional.
-  const actual = balanza("2025-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", -500],
-    ["33010200", "Utilidades Acumuladas", -25000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 8000],
-    ["40010000", "Ingresos", 60000],
-    ["50010000", "Gastos Operativos", 58000],
+  // Año actual: Utilidades Acumuladas subió exactamente los 5000 trasladados del ejercicio
+  // anterior (sin pago de IR), y el resto de saldos se mantiene; utilidad del ejercicio actual = 8000.
+  const actual = situacion("2025-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -15000],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 8000],
+    ["Total PATRIMONIO", 111000],
   ]);
 
-  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
 
-  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2024"), -5000);
-  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2025"), 2000);
-  assert.equal(linea(reporte, "Utilidades Acumuladas"), -20000, "debe tomar el saldo inicial de la primera aparición (año anterior)");
-  assert.equal(linea(reporte, "Variación en Utilidades Acumuladas"), -5000);
-  assert.equal(linea(reporte, "Traslado esperado (resultado del ejercicio 2024)"), -5000);
-  assert.equal(linea(reporte, "Diferencia sin explicar en Utilidades Acumuladas"), 0, "el traslado explica toda la variación, sin ajustes pendientes");
-  assert.equal(reporte.advertencias?.some(aviso => aviso.includes("no se explica completamente")), false);
+  assert.equal(reporte.tipo, "cambio-patrimonio");
+  assert.equal(reporte.periodo, 2025);
+  assert.equal(reporte.periodoComparativo, 2024);
+  assert.equal(reporte.filas.length, 5, "apertura, traslado, impuesto, resultado y totales");
+  assert.ok(reporte.filas.every(item => item.valores?.length === 6), "cada fila trae las 6 columnas patrimoniales");
+
+  assert.equal(fila(reporte, "Traslado a utilidades acumuladas").valores[2], 5000, "traslada la utilidad 2024 a Utilidades Acumuladas");
+  assert.equal(fila(reporte, "Traslado a utilidades acumuladas").valores[4], -5000, "sale de la columna de Utilidad del Ejercicio al trasladarse");
+  assert.equal(Math.abs(fila(reporte, "Pago de Impuesto IR").valores[2]), 0, "sin PAGO MINIMO DEFINITIVO el impuesto es cero");
+  assert.equal(fila(reporte, "Utilidades del Ejercicio").valores[4], 8000, "utilidad del ejercicio actual (excedentes 2025)");
+
+  const totales = fila(reporte, "Totales").valores;
+  assert.equal(totales[2], -15000, "Utilidades Acumuladas calculada: -20000 + 5000 trasladado");
+  assert.equal(totales[5], 111000, "Total = suma de las 5 columnas patrimoniales");
+
+  assert.ok(reporte.validacion, "el ECP se autovalida contra el cierre del Estado de Situación Financiera");
+  assert.equal(reporte.validacion.conciliado, true, "los totales calculados coinciden con lo que reporta el ESF al cierre actual");
+  assert.ok(reporte.validacion.diferencias.every(item => Math.abs(item.diferencia) < 0.01));
 });
 
-test("una diferencia sin explicar en Utilidades Acumuladas se advierte, no se oculta", () => {
-  const anterior = balanza("2024-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", -500],
-    ["33010200", "Utilidades Acumuladas", -20000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 8000],
-    ["40010000", "Ingresos", 50000],
-    ["50010000", "Gastos Operativos", 55000], // resultado 2024 = -5000
+test("una diferencia contra el cierre del ESF se advierte con conciliado:false, no se oculta", () => {
+  const anterior = situacion("2024-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -20000],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 5000],
   ]);
-  // Utilidades Acumuladas bajó 8,000 en vez de los 5,000 esperados: hay un ajuste de -3,000 sin explicar.
-  const actual = balanza("2025-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", -500],
-    ["33010200", "Utilidades Acumuladas", -28000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 8000],
-    ["40010000", "Ingresos", 60000],
-    ["50010000", "Gastos Operativos", 58000],
+  // Utilidades Acumuladas del cierre actual no cuadra con el traslado esperado (hay un ajuste de
+  // -3000 que el sistema no puede explicar por sí solo).
+  const actual = situacion("2025-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -18000],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 8000],
+    ["Total PATRIMONIO", 111000],
   ]);
 
-  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
-
-  assert.equal(linea(reporte, "Variación en Utilidades Acumuladas"), -8000);
-  assert.equal(linea(reporte, "Traslado esperado (resultado del ejercicio 2024)"), -5000);
-  assert.equal(linea(reporte, "Diferencia sin explicar en Utilidades Acumuladas"), -3000);
-  assert.ok(reporte.advertencias?.some(aviso => aviso.includes("diferencia de -3000.00")), "debe advertir la diferencia exacta, no redondearla en silencio");
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+  assert.equal(reporte.validacion.conciliado, false);
+  const diferenciaUA = reporte.validacion.diferencias.find(item => item.concepto === "Utilidades acumuladas");
+  assert.equal(diferenciaUA.calculado, -15000);
+  assert.equal(diferenciaUA.estadoFinanciero, -18000);
+  assert.equal(diferenciaUA.diferencia, 3000);
 });
 
-test("el total de movimientos del ejercicio reconstruye exacto la diferencia entre saldo inicial y final", () => {
-  const anterior = balanza("2024-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", -500],
-    ["33010200", "Utilidades Acumuladas", -20000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 8000],
-    ["40010000", "Ingresos", 50000],
-    ["50010000", "Gastos Operativos", 55000],
+test("el pago de IR del ejercicio anterior (PAGO MINIMO DEFINITIVO) se resta en Utilidades Acumuladas y en el Total", () => {
+  // NOTA: esta línea es una hipótesis de trabajo sin confirmar con contabilidad (ver comentario en
+  // reporteCambioPatrimonioDesdeSituaciones); esta prueba solo verifica el cálculo, no que el
+  // concepto sea correcto contablemente.
+  const anterior = situacion("2024-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -20000],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 5000],
+    ["PAGO MINIMO DEFINITIVO", 1200],
   ]);
-  // Este año además hubo una donación nueva que subió Patrimonio Donado y la Revaluación cambió.
-  const actual = balanza("2025-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 15000],
-    ["33010100", "Incremento o Decremento del Patrimonio", -500],
-    ["33010200", "Utilidades Acumuladas", -25000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 9200],
-    ["40010000", "Ingresos", 60000],
-    ["50010000", "Gastos Operativos", 58000],
+  const actual = situacion("2025-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -16200],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 8000],
+    ["Total PATRIMONIO", 109800],
   ]);
 
-  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
-  const totalInicial = linea(reporte, "Total Patrimonio (saldo inicial)");
-  const totalFinal = linea(reporte, "Total Patrimonio (saldo final)");
-  const totalMovimientos = linea(reporte, "Total movimientos del ejercicio");
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+  const impuesto = fila(reporte, "Pago de Impuesto IR").valores;
+  assert.equal(impuesto[2], -1200, "columna Utilidades acumuladas: -saldo de PAGO MINIMO DEFINITIVO");
+  assert.equal(impuesto[5], -1200, "columna Total: mismo efecto, arrastra el impuesto");
 
-  assert.equal(Math.round((totalInicial + totalMovimientos) * 100) / 100, totalFinal, "saldo inicial + movimientos debe reconstruir el saldo final, siempre, por construcción");
+  const totales = fila(reporte, "Totales").valores;
+  assert.equal(totales[2], -16200, "-20000 + 5000 trasladado - 1200 de impuesto");
+  assert.equal(reporte.validacion.conciliado, true, "el ECP reconstruye exacto el cierre cuando se incluye el ajuste de IR");
 });
 
-test("una cuenta de patrimonio ausente en la balanza se advierte y se toma como cero", () => {
-  const anterior = balanza("2024-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010200", "Utilidades Acumuladas", -20000],
-    // Falta 33010100 y 33010300 a propósito.
-    ["40010000", "Ingresos", 50000],
-    ["50010000", "Gastos Operativos", 55000],
+test("saldos inicial + movimientos (traslado + impuesto + resultado) reconstruyen exacto cada columna del total", () => {
+  const anterior = situacion("2024-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 100000],
+    ["Patrimonio Donado", 10000],
+    ["Utilidades Acumuladas", -20000],
+    ["Incremento o Decremento por Revaluacion de Activos", 8000],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 5000],
   ]);
-  const actual = balanza("2025-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010200", "Utilidades Acumuladas", -25000],
-    ["40010000", "Ingresos", 60000],
-    ["50010000", "Gastos Operativos", 58000],
-  ]);
-
-  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
-  assert.equal(linea(reporte, "Incremento o Decremento del Patrimonio"), 0);
-  assert.ok(reporte.advertencias?.some(aviso => aviso.includes("No se encontraron en la balanza importada")));
-  assert.ok(reporte.advertencias?.some(aviso => aviso.includes("33010100")));
-  assert.ok(reporte.advertencias?.some(aviso => aviso.includes("33010300")));
-});
-
-test("una pérdida del ejercicio anterior se traslada como negativo, y una utilidad como positivo", () => {
-  const anterior = balanza("2024-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", 0],
-    ["33010200", "Utilidades Acumuladas", -10000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 0],
-    ["40010000", "Ingresos", 70000],
-    ["50010000", "Gastos Operativos", 60000], // ganancia de 10000
-  ]);
-  const actual = balanza("2025-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", 0],
-    ["33010200", "Utilidades Acumuladas", 0], // subió 10000, coincide exacto con la ganancia trasladada
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 0],
-    ["40010000", "Ingresos", 65000],
-    ["50010000", "Gastos Operativos", 65000],
+  const actual = situacion("2025-12", [
+    ["Patrimonio Iglesia Universal del Reino de Dios", 105000],
+    ["Patrimonio Donado", 12000],
+    ["Utilidades Acumuladas", -15000],
+    ["Incremento o Decremento por Revaluacion de Activos", 9200],
+    ["Excedente Ingresos s/Egresos acumulados", 0],
+    ["Excedente Ingresos s/Egresos del ejercicio", 8000],
   ]);
 
-  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
-  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2024"), 10000);
-  assert.equal(linea(reporte, "Traslado esperado (resultado del ejercicio 2024)"), 10000);
-  assert.equal(linea(reporte, "Diferencia sin explicar en Utilidades Acumuladas"), 0);
-});
-
-test("una balanza con jerarquía de cuentas (mayor + detalle) no cuenta la utilidad del ejercicio varias veces", () => {
-  // Refleja la forma real de la balanza de la institución: 40000000 (mayor), 41000000 y 41010000
-  // (sub-mayores que repiten el mismo saldo acumulado) y las cuentas de detalle por iglesia
-  // (41010101, 41010102) que sí son las hojas y suman el total real. Sumar por prefijo de clase
-  // sin distinguir mayor de detalle multiplicaría el ingreso varias veces.
-  const anterior = balanza("2024-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", 0],
-    ["33010200", "Utilidades Acumuladas", -20000],
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 0],
-    ["40000000", "INGRESOS", 50000],
-    ["41000000", "INGRESOS / DIEZMOS Y OFRENDAS", 50000],
-    ["41010000", "DIEZMOS / OFRENDAS", 50000],
-    ["41010101", "Diezmos Iglesia Sede Nacional", 30000],
-    ["41010102", "Diezmos Iglesia Bello Horizonte", 20000],
-    ["50000000", "GASTOS OPERATIVOS", 45000],
-    ["51000000", "GASTOS DE OPERACION", 45000],
-    ["51010101", "Gastos de personal", 45000],
-  ]);
-  const actual = balanza("2025-12", [
-    ["31010000", "Patrimonio", 100000],
-    ["31020000", "Patrimonio Donado", 10000],
-    ["33010100", "Incremento o Decremento del Patrimonio", 0],
-    ["33010200", "Utilidades Acumuladas", -15000], // -20000 + 5000 (resultado 2024)
-    ["33010300", "Incremento o Decremento por Revaluacion de Activos", 0],
-    ["40000000", "INGRESOS", 60000],
-    ["41000000", "INGRESOS / DIEZMOS Y OFRENDAS", 60000],
-    ["41010000", "DIEZMOS / OFRENDAS", 60000],
-    ["41010101", "Diezmos Iglesia Sede Nacional", 38000],
-    ["41010102", "Diezmos Iglesia Bello Horizonte", 22000],
-    ["50000000", "GASTOS OPERATIVOS", 50000],
-    ["51000000", "GASTOS DE OPERACION", 50000],
-    ["51010101", "Gastos de personal", 50000],
-  ]);
-
-  const reporte = reporteCambioPatrimonioDesdeBalanza(actual, anterior, "2025", "2024");
-  // Resultado real 2024 = 50000 (ingresos, un solo nivel) - 45000 (gastos, un solo nivel) = 5000.
-  // Si se sumaran los tres niveles de mayor además del detalle, saldría ~4x más grande.
-  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2024"), 5000);
-  assert.equal(linea(reporte, "Utilidad (pérdida) del Ejercicio 2025"), 10000);
-  assert.equal(linea(reporte, "Traslado esperado (resultado del ejercicio 2024)"), 5000);
-  assert.equal(linea(reporte, "Diferencia sin explicar en Utilidades Acumuladas"), 0);
+  const reporte = reporteCambioPatrimonioDesdeSituaciones(actual, anterior);
+  const apertura = fila(reporte, "Saldos al 31/12").valores;
+  const traslado = fila(reporte, "Traslado a utilidades acumuladas").valores;
+  const impuesto = fila(reporte, "Pago de Impuesto IR").valores;
+  const resultado = fila(reporte, "Utilidades del Ejercicio").valores;
+  const totales = fila(reporte, "Totales").valores;
+  for (let indice = 0; indice < 6; indice += 1) {
+    const reconstruido = Math.round((apertura[indice] + traslado[indice] + impuesto[indice] + resultado[indice] + Number.EPSILON) * 100) / 100;
+    assert.equal(reconstruido, totales[indice], `columna ${indice}: apertura + movimientos debe reconstruir el total, por construcción`);
+  }
 });

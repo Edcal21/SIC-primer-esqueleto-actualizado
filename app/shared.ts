@@ -1,6 +1,6 @@
-export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
-export type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[] };
-export type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string; cuentaBancariaNumero?: string | null; periodoInicio?: string | null; periodoFin?: string | null; totalLineas?: number; totalDebitos?: string; totalCreditos?: string; mensajeError?: string | null; conciliacionId?: string | null; conciliacionEstado?: string | null };
+export type Permiso = "panel:ver" | "usuarios:administrar" | "roles:administrar" | "movimientos:escribir" | "catalogo:administrar" | "iglesias:administrar" | "banco:ver" | "banco:cargar" | "conciliacion:ver" | "conciliacion:gestionar" | "conciliacion:aprobar" | "importaciones:administrar" | "reportes:ver" | "reportes:descargar" | "auditoria:ver" | "configuracion:administrar";
+export type User = { id: string; usuario: string; nombre: string; rol: "administrador" | "contador_general" | "operador_bancario" | "auditor_general"; permisos: Permiso[]; debeCambiarPassword?: boolean };
+export type Reporte = { id: string; nombre: string; fecha: string; estado: string; cargadoPor: string; archivoTamano?: number; creadoEn?: string; cuentaBancariaNumero?: string | null; periodoInicio?: string | null; periodoFin?: string | null; totalLineas?: number; totalDebitos?: string; totalCreditos?: string; mensajeError?: string | null; archivoImportadoId?: string | null; version?: number | null; hashSha256?: string | null; conciliacionId?: string | null; conciliacionEstado?: string | null };
 export type LineaBanco = { id: string; numeroLinea: number; fecha: string | null; referencia: string | null; descripcion: string; debito: string; credito: string; saldo: string | null; moneda: "USD" | "NIO"; tasaCambio: string | null; debitoNio: string | null; creditoNio: string | null; estadoConciliacion: "pendiente" | "conciliada" | "descartada"; movimientoId: string | null };
 export type MovimientoConciliable = { id: string; fecha: string; referencia: string | null; concepto: string; monto: number; montoOriginal: number; moneda: "USD" | "NIO"; sentido: "entrada" | "salida" | null; completo: boolean; lineaId: string | null };
 export type LineaConciliacion = LineaBanco & { movimiento: MovimientoConciliable | null };
@@ -25,18 +25,21 @@ export type ReporteDisponible = { id: string; nombre: string; cuentaBancariaNume
 export type Evento = { fecha: string; usuario: string; accion: string; resultado: string; detalle?: string | null };
 export type ImportacionBalanza = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; totalLineas: number; totalDebe: string; totalHaber: string; creadoEn: string };
 export type ImportacionSituacionFinanciera = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "con_diferencias" | "error"; observaciones?: string | null; totalLineas: number; creadoEn: string };
+export type ImportacionEstadoResultado = { id: string; archivoNombre: string; archivoTamano: number; periodo: string; estado: "procesado" | "error"; totalLineas: number; totalIngresos: string; totalGastos: string; resultadoEjercicio: string; creadoEn: string };
+export type ArchivoImportado = { id: string; tipo: "estado_bancario" | "balanza" | "situacion_financiera" | "estado_resultado" | "catalogo_contable" | "auxiliar_contable"; archivoNombre: string; archivoMime: string; archivoTamano: number; archivoHashSha256: string; cuentaBancariaNumero: string | null; periodo: string | null; version: number; cantidadRegistros: number; totalesControl: Record<string, string | number>; estado: "procesado" | "error"; mensajeError: string | null; importadoPor: string; importadoPorNombre: string; creadoEn: string };
+export type ArchivoConciliacion = Pick<ArchivoImportado, "id" | "tipo" | "archivoNombre" | "archivoTamano" | "archivoHashSha256" | "cuentaBancariaNumero" | "periodo" | "version" | "cantidadRegistros" | "totalesControl" | "importadoPorNombre" | "creadoEn"> & { rol: "estado_bancario" | "movimientos" };
 export type PermisoAdmin = { id: Permiso; descripcion: string };
 export type SaludRespaldo = "al_dia" | "atrasado" | "critico" | "sin_datos";
 export type EventoRespaldo = { id: string; iniciadoEn: string; finalizadoEn: string | null; estado: "correcto" | "error"; modo: "programado" | "manual"; archivo: string; tamanoBytes: string | null; duracionSegundos: number | null; copiaSecundariaOk: boolean | null; servidor: string | null; mensaje: string | null };
 export type SolicitudRespaldo = { id: string; solicitadoPor: string; solicitadoPorNombre: string; solicitadoEn: string; estado: "pendiente" | "completado" | "error"; atendidoEn: string | null; respaldoId: string | null; minutosPendiente: number; demorada: boolean };
 export type EstadoRespaldos = { salud: SaludRespaldo; mensaje: string; ultimoCorrecto: EventoRespaldo | null; recientes: EventoRespaldo[]; solicitudPendiente: SolicitudRespaldo | null };
 export type RolAdmin = { id: string; nombre: string; descripcion: string; permisos: Permiso[] };
-export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; creadoEn: string; rolNombre?: string | null };
+export type UsuarioAdmin = { id: string; usuario: string; nombre: string; rolId: string; estado: "activo" | "inactivo"; debeCambiarPassword?: boolean; creadoEn: string; rolNombre?: string | null };
 export type Iglesia = { codigo: string; nombre: string; estado?: "activa" | "inactiva" };
 export type CuentaBancaria = { numeroCuenta: string; nombre: string; moneda: "USD" | "NIO"; estado?: "activa" | "inactiva" };
 export type TipoReporte = "flujo-efectivo" | "balanza-anual" | "cambio-patrimonio" | "situacion-comparativa" | "resultado-comparativo" | "minutas";
 export type Granularidad = "dia" | "mes" | "trimestre" | "anio";
-export type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoFuente?:string; periodoComparativoFuente?:string; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;esTotal?:boolean;esEncabezado?:boolean}[]; generadoEn:string; advertencias?:string[] };
+export type ReporteFinanciero = { tipo:TipoReporte; titulo:string; descripcion:string; periodo:number; periodoComparativo?:number; periodoFuente?:string; periodoComparativoFuente?:string; periodoEtiqueta?:string; comparativoEtiqueta?:string; granularidad?:Granularidad; moneda:"NIO"; fuente:string; columnas:string[]; filas:{concepto:string;codigo?:string;actual:number;anterior?:number;variacion?:number;valores?:number[];esTotal?:boolean;esEncabezado?:boolean}[]; validacion?:{conciliado:boolean;diferencias:{concepto:string;calculado:number;estadoFinanciero:number;diferencia:number}[]}; generadoEn:string; advertencias?:string[] };
 export type FilaReporteMinuta = { id:string; fecha:string; iglesiaCodigo:string|null; iglesiaNombre:string|null; cuentaBancariaNumero:string|null; referencia:string|null; concepto:string; monto:number; lineas:number; estado:"registrado"|"anulado" };
 export type ReporteMinutasData = { titulo:string; desde:string; hasta:string; iglesiaCodigo:string|null; filas:FilaReporteMinuta[]; resumen:{ total:number; vigentes:number; anuladas:number; montoVigente:number }; iglesias:Iglesia[]; truncado:boolean; generadoEn:string };
 export type CuentaMovimiento = { codigo: string; descripcion: string; naturaleza: "deudora" | "acreedora"; clasificacionFlujo: "operación" | "inversión" | "financiamiento" | "no aplica"; esCuentaMovimiento: boolean; estado: "activa" | "inactiva" };
@@ -49,7 +52,7 @@ export type OpcionReporte = { tipo: TipoReporte; titulo: string; descripcion: st
 export type ModalState = { title: string; message: string; confirmLabel?: string; onConfirm: () => void | Promise<void>; isDanger?: boolean };
 export type RequestConfirmation = (modal: ModalState) => void;
 
-export const nombresRol = { administrador: "Administrador", contador_general: "Contador general", operador_bancario: "Operador bancario", auditor_general: "Auditor general" };
+export const nombresRol = { administrador: "Administrador", contador_general: "Contador", operador_bancario: "Finanzas", auditor_general: "Auditor general" };
 export const etiquetasPermiso: Record<Permiso, string> = {
   "panel:ver": "Ver panel",
   "usuarios:administrar": "Administrar usuarios",
@@ -59,6 +62,8 @@ export const etiquetasPermiso: Record<Permiso, string> = {
   "iglesias:administrar": "Administrar iglesias",
   "banco:ver": "Ver bancos",
   "banco:cargar": "Cargar reportes bancarios",
+  "conciliacion:ver": "Ver conciliación",
+  "conciliacion:gestionar": "Gestionar conciliación",
   "conciliacion:aprobar": "Aprobar conciliación",
   "importaciones:administrar": "Importar estados financieros",
   "reportes:ver": "Ver reportes",
@@ -74,7 +79,7 @@ export const menu = [
   { nombre: "Catálogo contable", permiso: "catalogo:administrar" as Permiso, icono: "catalog" },
   { nombre: "Iglesias", permiso: "iglesias:administrar" as Permiso, icono: "church" },
   { nombre: "Bancos", permiso: "banco:ver" as Permiso, icono: "bank" },
-  { nombre: "Conciliación", permiso: "banco:ver" as Permiso, icono: "reconcile" },
+  { nombre: "Conciliación", permiso: "conciliacion:ver" as Permiso, icono: "reconcile" },
   { nombre: "Importaciones", permiso: "importaciones:administrar" as Permiso, icono: "upload" },
   { nombre: "Reportes", permiso: "reportes:ver" as Permiso, icono: "reports" },
   { nombre: "Auditoría", permiso: "auditoria:ver" as Permiso, icono: "audit" },
