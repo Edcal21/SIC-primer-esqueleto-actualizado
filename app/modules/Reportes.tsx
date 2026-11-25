@@ -20,10 +20,10 @@ export default function Reportes({ canDownload }: { canDownload: boolean }) {
 
   async function generar(selected: TipoReporte = tipo) {
     if (selected === "minutas") {
-      setTipo(selected); setLoading(false); setError("");
+      setTipo(selected); setLoading(false); setError(""); setReporte(null);
       return;
     }
-    setLoading(true); setError(""); setTipo(selected);
+    setLoading(true); setError(""); setReporte(null); setTipo(selected);
     try {
       const esAnual = selected === "cambio-patrimonio" || selected === "balanza-anual";
       const requiereResultado = selected === "resultado-comparativo";
@@ -33,8 +33,9 @@ export default function Reportes({ canDownload }: { canDownload: boolean }) {
       if (nivel !== granularidad || principal !== periodo || comparativo !== comparar) { setGranularidad(nivel); setPeriodo(principal); setComparar(comparativo); }
       const response = await fetch(url(selected, undefined, nivel, principal, comparativo));
       const data = await response.json();
-      if (response.ok) setReporte(data.reporte); else setError(data.error);
+      if (response.ok) setReporte(data.reporte); else { setReporte(null); setError(data.error); }
     } catch {
+      setReporte(null);
       setError("No se pudo conectar con el generador de reportes");
     } finally { setLoading(false); }
   }

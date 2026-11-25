@@ -6,6 +6,17 @@ import * as XLSX from "xlsx";
 
 const cuenta = (codigo, concepto, debe, haber, saldo) => ({ codigo, concepto, debe, haber, saldo });
 
+test("los reportes trimestrales consultan el mes de cierre del trimestre", async () => {
+  const { periodoCierreReporte } = await import(`../lib/reportes.ts?cierres-trimestrales=${Date.now()}`);
+  assert.equal(periodoCierreReporte("trimestre", "2026-T1"), "2026-03");
+  assert.equal(periodoCierreReporte("trimestre", "2026-T2"), "2026-06");
+  assert.equal(periodoCierreReporte("trimestre", "2026-T3"), "2026-09");
+  assert.equal(periodoCierreReporte("trimestre", "2026-T4"), "2026-12");
+  assert.equal(periodoCierreReporte("mes", "2026-09"), "2026-09");
+  assert.equal(periodoCierreReporte("anio", "2026"), "2026-12");
+  assert.throws(() => periodoCierreReporte("trimestre", "2026-T5"), /Trimestre inválido/);
+});
+
 test("la balanza anual usa el saldo inicial de enero y suma los movimientos mensuales", async () => {
   const { reporteBalanzaAnualDesdeMeses } = await import(`../lib/reportes.ts?balanza-anual=${Date.now()}`);
   const reporte = reporteBalanzaAnualDesdeMeses([

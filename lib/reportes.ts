@@ -50,15 +50,17 @@ function datosPeriodo(granularidad:Granularidad, periodo:string){
   const date=new Date(`${periodo}T00:00:00Z`);if(Number.isNaN(date.getTime()))throw new Error("Fecha inválida");return{anio,factor:1/365,etiqueta:new Intl.DateTimeFormat("es-NI",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(date)};
 }
 
-const periodoBalanza = (granularidad: Granularidad, periodo: string) => granularidad === "anio" ? `${periodo.slice(0,4)}-12` : periodo.slice(0,7);
-const periodoEstadoResultado = (granularidad: Granularidad, periodo: string) => {
+export const periodoCierreReporte = (granularidad: Granularidad, periodo: string) => {
   if (granularidad === "anio") return `${periodo.slice(0, 4)}-12`;
   if (granularidad === "trimestre") {
     const trimestre = Number(periodo.split("T")[1]);
+    if (!Number.isInteger(trimestre) || trimestre < 1 || trimestre > 4) throw new Error("Trimestre inválido");
     return `${periodo.slice(0, 4)}-${String(trimestre * 3).padStart(2, "0")}`;
   }
   return periodo.slice(0, 7);
 };
+const periodoBalanza = periodoCierreReporte;
+const periodoEstadoResultado = periodoCierreReporte;
 const claseCuenta = (codigo: string) => codigo.startsWith("1") ? "activo" : codigo.startsWith("2") ? "pasivo" : codigo.startsWith("3") ? "patrimonio" : codigo.startsWith("4") ? "ingreso" : codigo.startsWith("5") ? "gasto" : "otra";
 
 async function obtenerBalanza(db: Db, periodo: string): Promise<BalanzaPeriodo | null> {
